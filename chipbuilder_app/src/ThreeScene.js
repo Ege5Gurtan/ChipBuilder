@@ -5,17 +5,19 @@ const ThreeScene = () => {
   const mountRef = useRef(null);
 
   useEffect(() => {
+    const mount = mountRef.current;
+
     // Create Scene, Camera, and Renderer
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
       75,
-      mountRef.current.clientWidth / mountRef.current.clientHeight,
+      mount.clientWidth / mount.clientHeight,
       0.1,
       1000
     );
     const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-    mountRef.current.appendChild(renderer.domElement);
+    renderer.setSize(mount.clientWidth, mount.clientHeight);
+    mount.appendChild(renderer.domElement);
 
     // Add a rotating cube
     const geometry = new THREE.BoxGeometry();
@@ -40,8 +42,8 @@ const ThreeScene = () => {
       if (renderer) {
         renderer.dispose(); // Free up resources used by the renderer
       }
-      if (mountRef.current && renderer.domElement) {
-        mountRef.current.removeChild(renderer.domElement); // Safely remove the renderer from DOM
+      if (mount && renderer.domElement) {
+        mount.removeChild(renderer.domElement); // Safely remove the renderer from DOM
       }
     };
   }, []);
