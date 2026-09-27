@@ -2,9 +2,9 @@ const levels = [
   {
     id: 'signal-order',
     number: '01',
-    title: 'Write the packet',
-    goal: 'Collect the three bits and deposit 1 → 0 → 1 into the signal bucket.',
-    lesson: 'Signals are ordered. The carrier can hold bits, but the destination reads the bucket from left to right.',
+    title: 'The broken signal',
+    goal: 'Fabricate a route, collect three bits, then deposit 1 → 0 → 1 into the signal bucket.',
+    lesson: 'Mask the oxide with lithography, etch a passage, deposit copper into the trench and polish it with CMP. WASD always moves the carrier.',
     target: '101',
     start: { x: -5.2, y: -3.7 },
     destination: { x: 5.2, y: 3.7 },
@@ -15,7 +15,7 @@ const levels = [
     ],
     obstacles: [],
     gates: [],
-    fabrication: null,
+    fabrication: { terrain: true },
   },
   {
     id: 'open-channel',

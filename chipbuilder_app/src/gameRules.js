@@ -1,3 +1,5 @@
+import { createTerrain, FAB_TOOLS, terrainMaterial } from './terrain.js';
+
 export const PLAYER_RADIUS = 0.34;
 export const PICKUP_RADIUS = 0.62;
 export const DESTINATION_RADIUS = 0.72;
@@ -8,12 +10,14 @@ export function createGame(level) {
     player: { ...level.start },
     cargo: [],
     signal: [],
+    returnCounter: 0,
     collectedIds: [],
     gateState: Object.fromEntries(
       level.gates.map((gate) => [gate.id, { inputs: {}, output: null }])
     ),
     fabrication: { patterned: false, etched: false },
-    cost: { processSteps: 0, energy: 0 },
+    terrain: level.fabrication?.terrain ? createTerrain() : null,
+    cost: { processSteps: 0, energy: 0, manufacturing: 0 },
     status: 'playing',
     message: 'Carrier online. Follow the goal and deliver the exact target signal.',
   };
@@ -73,11 +77,7 @@ function evaluateDestination(level, state) {
       ? `Expected ${level.target.length} bit${level.target.length === 1 ? '' : 's'}, received ${actual.length}.`
       : `Bit order/value mismatch: received ${actual}, expected ${level.target}.`;
 
-  return {
-    ...state,
-    status: 'failed',
-    message: `Delivery rejected. ${explanation}`,
-  };
+  return { ...state, message: `Delivery rejected. ${explanation} You can still correct the bucket.` };
 }
 
 export function movePlayer(level, state, movement) {
@@ -87,7 +87,8 @@ export function movePlayer(level, state, movement) {
     x: Math.max(-5.65, Math.min(5.65, state.player.x + movement.x)),
     y: Math.max(-4.15, Math.min(4.15, state.player.y + movement.y)),
   };
-  const player = activeObstacles(level, state).some((obstacle) => overlapsObstacle(candidate, obstacle))
+  const blocked = state.terrain && ['oxide', 'trench', 'rough'].includes(terrainMaterial(state.terrain, candidate.x, candidate.y));
+  const player = blocked || activeObstacles(level, state).some((obstacle) => overlapsObstacle(candidate, obstacle))
     ? state.player
     : candidate;
 
@@ -144,6 +145,19 @@ export function depositCargo(level, state, cargoId, target) {
   };
 }
 
+export function returnSignalBit(state, index) {
+  if (state.status !== 'playing' || index < 0 || index >= state.signal.length) return state;
+  const signal = state.signal.slice();
+  const value = signal.splice(index, 1)[0];
+  return {
+    ...state,
+    signal,
+    cargo: [...state.cargo, { id: `returned-${state.returnCounter}`, value }],
+    returnCounter: state.returnCounter + 1,
+    message: `Returned ${value} to cargo. Rebuild the signal in the correct order.`,
+  };
+}
+
 export function fabricate(level, state, action) {
   if (state.status !== 'playing' || !level.fabrication) return state;
   if (action === 'lithography') {
@@ -180,4 +194,39 @@ export function fabricate(level, state, action) {
     };
   }
   return state;
+}
+
+export function fabricateCell(state, action, col, row, newStroke) {
+  if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return state;
+  const cell = state.terrain[row]?.[col];
+  if (!cell) return state;
+  const allowed = action === 'lithography' ? cell.type === 'oxide' && !cell.masked
+    : action === 'etch' ? cell.type === 'oxide' && cell.masked
+    : action === 'deposit' ? cell.type === 'trench'
+    : cell.type === 'rough';
+  if (!allowed) {
+    const hint = {
+      lithography: 'Lithography patterns purple oxide.',
+      etch: 'Etch needs a yellow lithography mask on oxide.',
+      deposit: 'Deposit fills the dark trench with rough copper.',
+      cmp: 'CMP polishes deposited copper.',
+    };
+    return state.message === hint[action] ? state : { ...state, message: hint[action] };
+  }
+  const terrain = state.terrain.map((cells, index) => index === row ? cells.slice() : cells);
+  terrain[row][col] = {
+    type: action === 'etch' ? 'silicon' : action === 'deposit' ? 'rough' : action === 'cmp' ? 'metal' : cell.type,
+    masked: action === 'lithography',
+  };
+  const cost = FAB_TOOLS[action];
+  return {
+    ...state,
+    terrain,
+    cost: {
+      ...state.cost,
+      processSteps: state.cost.processSteps + Number(newStroke),
+      manufacturing: state.cost.manufacturing + cost.cell + (newStroke ? cost.base : 0),
+    },
+    message: `${cost.label} changed the wafer. +${cost.cell + (newStroke ? cost.base : 0)} credits.`,
+  };
 }

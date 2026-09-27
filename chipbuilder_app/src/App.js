@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import ThreeScene from './ThreeScene.js';
 import levels from './levels.js';
-import { createGame, depositCargo, fabricate, movePlayer } from './gameRules.js';
+import { createGame, depositCargo, fabricate, fabricateCell, movePlayer, returnSignalBit } from './gameRules.js';
+import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
 function Bit({ value }) {
@@ -13,6 +14,7 @@ function App() {
   const [unlockedLevel, setUnlockedLevel] = useState(0);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
+  const [selectedTool, setSelectedTool] = useState('lithography');
   const level = levels[levelIndex];
 
   const changeLevel = (index) => {
@@ -44,6 +46,10 @@ function App() {
 
   const runFabrication = (action) => {
     setGame((current) => fabricate(level, current, action));
+  };
+
+  const paintTerrain = (col, row, newStroke) => {
+    setGame((current) => fabricateCell(current, selectedTool, col, row, newStroke));
   };
 
   const nextLevel = () => {
@@ -78,7 +84,7 @@ function App() {
         <button className="restart-button" onClick={restart}>Restart level</button>
       </header>
 
-      <section className="telemetry" aria-label="Live signal status">
+      <section className={`telemetry ${game.terrain ? 'terrain-telemetry' : ''}`} aria-label="Live signal status">
         <div>
           <span>Target signal</span>
           <strong className="signal-value">{level.target}</strong>
@@ -99,6 +105,7 @@ function App() {
           <span>Energy</span>
           <strong>{game.cost.energy} u</strong>
         </div>
+        {game.terrain && <div><span>Manufacturing cost</span><strong>{game.cost.manufacturing} credits</strong></div>}
       </section>
 
       <div className="game-layout">
@@ -125,7 +132,7 @@ function App() {
         </aside>
 
         <section className="wafer-panel">
-          <ThreeScene level={level} game={game} onMove={handleMove} />
+          <ThreeScene level={level} game={game} onMove={handleMove} onPaint={paintTerrain} tool={selectedTool} />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
             <p>{game.message}</p>
@@ -140,6 +147,7 @@ function App() {
                 <div className="cost-summary">
                   <span><b>{game.cost.processSteps}</b> process steps</span>
                   <span><b>{game.cost.energy}</b> energy units</span>
+                  {game.terrain && <span><b>{game.cost.manufacturing}</b> fabrication credits</span>}
                 </div>
                 <div className="result-actions">
                   <button className="secondary-button" onClick={restart}>Restart</button>
@@ -221,7 +229,25 @@ function App() {
             );
           })}
 
-          {level.fabrication && (
+          {game.terrain && (
+            <section className="tool-section fabrication-section">
+              <div className="section-heading"><span>02</span><h3>Fabrication · mouse drag</h3></div>
+              <p className="microcopy">Select a process, then draw on the wafer. WASD keeps moving the electron.</p>
+              {Object.entries(FAB_TOOLS).map(([key, tool]) => (
+                <button
+                  key={key}
+                  className={selectedTool === key ? 'fab-done' : ''}
+                  onClick={() => setSelectedTool(key)}
+                  aria-pressed={selectedTool === key}
+                >
+                  <span>{tool.label}</span><small>{tool.base} + {tool.cell}/tile credits</small>
+                </button>
+              ))}
+              <p className="microcopy">Purple oxide → mask → etch. Dark trench → deposit → CMP.</p>
+            </section>
+          )}
+
+          {level.fabrication && !game.terrain && (
             <section className="tool-section fabrication-section">
               <div className="section-heading">
                 <span>02</span>
@@ -248,17 +274,31 @@ function App() {
               <span>{level.gates.length || level.fabrication ? '03' : '02'}</span>
               <h3>Signal bucket</h3>
             </div>
-            <button
+            <div
               className="signal-bucket"
+              role="button"
+              tabIndex={0}
+              aria-label="Deposit selected bit into signal bucket"
               onClick={() => deposit(selectedCargoId, { kind: 'signal' })}
+              onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); deposit(selectedCargoId, { kind: 'signal' }); } }}
               onDragOver={allowDrop}
               onDrop={(event) => handleDrop(event, { kind: 'signal' })}
             >
               <span className="bucket-label">DEPOSIT</span>
               <span className="bucket-bits">
-                {game.signal.length === 0 ? 'Drop or click here' : game.signal.map((value, index) => <Bit value={value} key={`${value}-${index}`} />)}
+                {game.signal.length === 0 ? 'Drop or click here' : game.signal.map((value, index) => (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="placed-bit"
+                    key={`${value}-${index}`}
+                    aria-label={`Return signal bit ${value} to cargo`}
+                    onClick={(event) => { event.stopPropagation(); setGame((current) => returnSignalBit(current, index)); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setGame((current) => returnSignalBit(current, index)); } }}
+                  ><Bit value={value} /></span>
+                ))}
               </span>
-            </button>
+            </div>
           </section>
         </aside>
       </div>
