@@ -1,0 +1,13 @@
+{
+  "name": "semicon-game",
+  "engine": "generic",
+  "launch": {
+    "cmd": "cmd.exe",
+    "args": ["/d", "/s", "/c", "npm start"]
+  },
+  "log": {
+    "stdout": true
+  },
+  "ready": "Compiled successfully",
+  "sourceRoots": ["src"]
+}
