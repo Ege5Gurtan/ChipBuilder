@@ -3,7 +3,7 @@
 ## Repository and current state
 
 - Repository: `Ege5Gurtan/ChipBuilder`.
-- The web app lives in `chipbuilder_app/`. It currently uses React, JavaScript, Create React App, and Three.js. The rotating cube is disposable starter content, not a game feature to preserve.
+- The web app lives in `chipbuilder_app/`. It uses React, JavaScript, Create React App, and Three.js. `levels.js` defines four missions; `gameRules.js` owns gameplay state and `terrain.js` defines the first mission's tile materials and process costs. `ThreeScene.js` renders a tilted 3D wafer and handles mouse painting and WASD movement; `App.js` renders the HUD and tool controls.
 - Read the current repository before changing code. Keep this file aligned with the implementation as the project evolves; distinguish intended features from features that actually exist.
 
 ## Game vision
@@ -21,6 +21,8 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 - Make signal state, cargo, gate inputs and outputs, destination requirement, and costs understandable on screen. Explain failed signal checks so a player can learn and retry.
 
 ## Levels and scoring
+
+- Current level 01 has a full wafer grid with oxide and trench barriers. Lithography, etch, copper deposition and CMP are selected in the sidebar and painted on the wafer with the mouse. Each valid stroke and affected tile contributes to manufacturing cost. The other three levels retain their existing gate and fixed-channel rules. Signal bucket bits can be returned to cargo for correction.
 
 - Start with a small playable loop: move the carrier, collect bits, deposit a signal, validate it against a target, and receive clear success or failure feedback.
 - Add fabrication actions and circuit elements incrementally as the loop becomes playable. Level goals should be explicit and build on earlier mechanics.

@@ -65,6 +65,7 @@ button { font: inherit; }
   display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr));
   border-bottom: 1px solid var(--line); background: #151d1f;
 }
+.telemetry.terrain-telemetry { grid-template-columns: repeat(6, minmax(100px, 1fr)); }
 .telemetry > div { min-height: 62px; padding: 10px 20px; border-right: 1px solid var(--line); }
 .telemetry span, .controls-note > span {
   display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .12em;
@@ -159,6 +160,8 @@ kbd {
 }
 .bucket-label { display: block; color: var(--gold); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
 .bucket-bits { min-height: 28px; margin-top: 8px; display: flex; justify-content: center; gap: 12px; align-items: center; color: var(--muted); font-size: 11px; }
+.placed-bit { cursor: pointer; padding: 4px 7px; border: 1px solid var(--line); border-radius: 4px; }
+.placed-bit:focus-visible { outline: 2px solid var(--cyan); }
 
 .result-screen { position: absolute; inset: 0 0 58px; display: grid; place-items: center; padding: 24px; background: rgba(11,16,17,.88); backdrop-filter: blur(5px); }
 .result-content { width: min(430px, 100%); border-top: 3px solid var(--gold); padding: 27px; background: #1b2527; box-shadow: 0 22px 60px rgba(0,0,0,.45); }
@@ -181,6 +184,7 @@ button:hover:not(:disabled) { filter: brightness(1.1); }
   .level-nav { grid-row: 2; grid-column: 1 / -1; justify-content: center; }
   .restart-button { grid-column: 2; grid-row: 1; }
   .telemetry { grid-template-columns: repeat(5, minmax(76px, 1fr)); overflow-x: auto; }
+  .telemetry.terrain-telemetry { grid-template-columns: repeat(6, minmax(86px, 1fr)); }
   .telemetry > div { min-width: 86px; }
   .game-layout { display: flex; flex-direction: column; }
   .mission-panel { border-right: 0; border-bottom: 1px solid var(--line); padding: 18px; }

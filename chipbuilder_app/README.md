@@ -68,3 +68,8 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+# Gameplay
+
+Level 01 uses a tilted 3D wafer. Select lithography, etch, deposition or CMP in the sidebar and paint the relevant material with the mouse. WASD moves the carrier continuously. Cross the barriers, collect the three bits, place them in order in the signal bucket, then reach the destination. Click a placed bit to return it to cargo. Manufacturing credits count each process stroke and tile changed.
+
+Levels 02–04 retain the existing fixed-channel and gate puzzles. The renderer, game rules and level definitions live in `src/ThreeScene.js`, `src/gameRules.js`, `src/terrain.js` and `src/levels.js`.
