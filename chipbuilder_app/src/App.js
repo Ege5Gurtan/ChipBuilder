@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, movePlayer, reorderCargo } from './gameRules.js';
+import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reorderCargo } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -32,6 +32,8 @@ function App() {
   const keyboardNav = useRef(false);
   const level = levels[levelIndex];
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
+  const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate));
+  const flashedIds = game.gateEvent?.ids || [];
 
   const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
 
@@ -296,15 +298,15 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {level.gates.length > 0 && ' Drag or click a bit onto a gate socket.'}
+              {socketGates.length > 0 && ' Drag or click a bit onto a gate socket.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
               {game.cargo.length === 0 && <span className="empty-state">Move over a bit to collect it.</span>}
               {displayedCargo.map((item, index) => (
                 <button
-                  key={item.id}
+                  key={flashedIds.includes(item.id) ? `${item.id}-${game.gateEvent.seq}` : item.id}
                   ref={(element) => { if (element) itemRefs.current.set(item.id, element); else itemRefs.current.delete(item.id); }}
-                  className={`cargo-bit ${selectedId === item.id ? 'selected' : ''} ${drag?.id === item.id ? 'drag-placeholder' : ''}`}
+                  className={`cargo-bit ${selectedId === item.id ? 'selected' : ''} ${drag?.id === item.id ? 'drag-placeholder' : ''} ${flashedIds.includes(item.id) ? 'gate-flash' : ''}`}
                   onClick={() => cargoClick(item.id)}
                   onPointerDown={(event) => cargoPointerDown(event, item.id)}
                   onPointerMove={cargoPointerMove}
@@ -326,6 +328,30 @@ function App() {
 
           {level.gates.map((gate) => {
             const currentGate = game.gateState[gate.id];
+            if (isPassThroughGate(gate)) {
+              const active = game.gateEvent?.gateId === gate.id;
+              return (
+                <section className="tool-section gate-section" key={gate.id}>
+                  <div className="section-heading">
+                    <span>02</span>
+                    <h3>{gate.type} gate</h3>
+                  </div>
+                  <div
+                    key={game.gateEvent?.seq || 0}
+                    className={`gate-passthrough ${active ? 'gate-flash' : ''}`}
+                  >
+                    <span className="gate-passthrough-tag">Pass through</span>
+                    <strong>0 ↔ 1</strong>
+                  </div>
+                  <p className="microcopy">Walking through this gate flips every carried bit. No placement needed.</p>
+                  <p className="gate-reason">
+                    {currentGate.inside
+                      ? `Inside ${gate.type}. Already applied — exit and return to flip again.`
+                      : `Cross ${gate.type} to invert the cargo.`}
+                  </p>
+                </section>
+              );
+            }
             return (
               <section className="tool-section gate-section" key={gate.id}>
                 <div className="section-heading">

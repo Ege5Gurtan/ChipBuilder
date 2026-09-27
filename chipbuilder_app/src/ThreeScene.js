@@ -1,9 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
+import { gateFootprint } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
+const GATE_PULSE_COLOR = new THREE.Color(0xffd16c);
 const PULSE_COLORS = { accept: new THREE.Color(0x6ee37a), partial: new THREE.Color(0x6ee37a), reject: new THREE.Color(0xf07162) };
 const PULSE_SECONDS = 0.6;
 const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, trench: 0x203143, rough: 0xad6635, metal: 0xe5ae50 };
@@ -89,12 +91,16 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(obstacle.width, 0.8, obstacle.height), new THREE.MeshStandardMaterial({ color: obstacle.fabricationTarget ? 0xc75d43 : 0x596362 }));
       mesh.position.set(obstacle.x, 0.53, -obstacle.y); scene.add(mesh); obstacles.set(obstacle.id, mesh);
     });
+    const gateMeshes = new Map();
     level.gates.forEach((gate) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(gate.type === 'AND' ? 2.15 : 1.75, 0.55, 1.35), new THREE.MeshStandardMaterial({ color: 0x3d5556 }));
+      const { width, height } = gateFootprint(gate);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, 0.55, height), new THREE.MeshStandardMaterial({ color: 0x3d5556 }));
       mesh.position.set(gate.x, 0.5, -gate.y); scene.add(mesh);
+      gateMeshes.set(gate.id, mesh);
       const text = label(gate.type, '#f2d078'); text.position.set(gate.x, 1.12, -gate.y); scene.add(text);
     });
-    visuals.current = { player, bits, bitMesh, obstacles, tiles, materials, pulse, clock: null, feedbackSeq: 0 };
+    const gatePulse = { mesh: null, start: 0 };
+    visuals.current = { player, bits, bitMesh, obstacles, tiles, materials, pulse, gateMeshes, gatePulse, clock: null, feedbackSeq: 0, gateSeq: 0 };
 
     const keys = new Set();
     const keyDown = (event) => {
@@ -164,6 +170,16 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
         destination.scale.setScalar(1 + 0.35 * Math.sin(t * Math.PI));
         if (t >= 1) pulse.color = null;
       }
+      if (gatePulse.mesh) {
+        const t = Math.min(1, (clock.elapsedTime - gatePulse.start) / PULSE_SECONDS);
+        gatePulse.mesh.material.emissive.copy(GATE_PULSE_COLOR).multiplyScalar(0.85 * (1 - t));
+        gatePulse.mesh.scale.y = 1 + 0.3 * Math.sin(t * Math.PI);
+        if (t >= 1) {
+          gatePulse.mesh.material.emissive.setScalar(0);
+          gatePulse.mesh.scale.y = 1;
+          gatePulse.mesh = null;
+        }
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -201,6 +217,12 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
     if (seq !== refs.feedbackSeq) {
       refs.feedbackSeq = seq;
       if (game.feedback) { refs.pulse.color = PULSE_COLORS[game.feedback.kind]; refs.pulse.start = refs.clock.elapsedTime; }
+    }
+    const gateSeq = game.gateEvent?.seq || 0;
+    if (gateSeq !== refs.gateSeq) {
+      refs.gateSeq = gateSeq;
+      const mesh = refs.gateMeshes.get(game.gateEvent?.gateId);
+      if (mesh) { refs.gatePulse.mesh = mesh; refs.gatePulse.start = refs.clock.elapsedTime; }
     }
     refs.obstacles.forEach((mesh, id) => {
       const obstacle = level.obstacles.find((item) => item.id === id);

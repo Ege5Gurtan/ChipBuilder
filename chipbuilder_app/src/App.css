@@ -171,6 +171,17 @@ kbd {
 .gate-body { height: 60px; display: grid; place-items: center; background: #34494a; border: 1px solid #587071; border-radius: 3px; font-weight: 800; font-size: 12px; }
 .gate-output { flex-direction: column; justify-content: center; }
 .gate-reason { margin-bottom: 0; color: var(--gold); }
+.gate-passthrough {
+  margin-top: 13px; padding: 12px; display: flex; align-items: center; justify-content: space-between;
+  background: #34494a; border: 1px solid #587071; border-radius: 3px;
+}
+.gate-passthrough-tag { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
+.gate-passthrough strong { font: 800 18px Bahnschrift, sans-serif; color: var(--gold); }
+.gate-flash { animation: gate-flip .55s ease-out; }
+@keyframes gate-flip {
+  0% { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(239,189,85,.7); transform: scale(1.08); }
+  100% { box-shadow: none; transform: none; }
+}
 
 .fabrication-section > button {
   width: 100%; margin-top: 7px; padding: 10px; border: 1px solid var(--line); border-radius: 3px;

@@ -5,6 +5,29 @@ export const PICKUP_RADIUS = 0.62;
 export const DESTINATION_RADIUS = 0.72;
 const DROP_DISTANCE = 0.45;
 
+// Unary gates transform carried cargo automatically when the carrier crosses them.
+const PASS_THROUGH_GATES = { NOT: (value) => (value === 0 ? 1 : 0) };
+const GATE_FOOTPRINTS = { NOT: { width: 1.75, height: 1.35 }, AND: { width: 2.15, height: 1.35 } };
+
+export function gateFootprint(gate) {
+  return GATE_FOOTPRINTS[gate.type] || { width: 1.6, height: 1.3 };
+}
+
+export function isPassThroughGate(gate) {
+  return Boolean(PASS_THROUGH_GATES[gate.type]);
+}
+
+export function applyGateToCargo(gateType, cargo) {
+  const transform = PASS_THROUGH_GATES[gateType];
+  if (!transform) return cargo;
+  return cargo.map((item) => ({ ...item, value: transform(item.value) }));
+}
+
+function isInsideGate(gate, position) {
+  const { width, height } = gateFootprint(gate);
+  return Math.abs(position.x - gate.x) <= width / 2 && Math.abs(position.y - gate.y) <= height / 2;
+}
+
 export function createGame(level) {
   return {
     levelId: level.id,
@@ -15,8 +38,9 @@ export function createGame(level) {
     worldBits: level.pickups.map(({ id, value, x, y }) => ({ id, value, x, y, armed: true })),
     atDestination: false,
     feedback: null,
+    gateEvent: null,
     gateState: Object.fromEntries(
-      level.gates.map((gate) => [gate.id, { inputs: {}, output: null }])
+      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, inside: false }])
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain ? createTerrain() : null,
@@ -76,12 +100,44 @@ export function collectBits(state) {
   };
 }
 
+// Fires once on entry; the gate re-arms only after the carrier leaves its footprint.
+function applyPassThroughGates(level, state) {
+  return level.gates.filter(isPassThroughGate).reduce((current, gate) => {
+    const entry = current.gateState[gate.id];
+    const inside = isInsideGate(gate, current.player);
+    if (inside === entry.inside) return current;
+
+    const cargo = inside ? applyGateToCargo(gate.type, current.cargo) : current.cargo;
+    const changed = cargo.filter((item, index) => item.value !== current.cargo[index].value);
+    const next = {
+      ...current,
+      cargo,
+      gateState: { ...current.gateState, [gate.id]: { ...entry, inside, output: changed.length ? changed[changed.length - 1].value : entry.output } },
+    };
+    if (!inside) return next;
+    if (!changed.length) {
+      return { ...next, message: `${gate.type} gate crossed with empty cargo. Collect a bit first.` };
+    }
+    return {
+      ...next,
+      gateEvent: {
+        seq: (current.gateEvent?.seq || 0) + 1,
+        gateId: gate.id,
+        gateType: gate.type,
+        ids: changed.map((item) => item.id),
+      },
+      cost: { ...current.cost, energy: current.cost.energy + changed.length },
+      message: `${gate.type}: ${changed.map((item) => `${item.value === 0 ? 1 : 0} → ${item.value}`).join(', ')}. Cargo: ${cargo.map(({ value }) => value).join(' ')}.`,
+    };
+  }, state);
+}
+
 export function movePlayer(level, state, movement) {
   if (state.status !== 'playing') return state;
 
   const candidate = clampToWafer({ x: state.player.x + movement.x, y: state.player.y + movement.y });
   const player = isWalkable(level, state, candidate) ? candidate : state.player;
-  const next = collectBits({ ...state, player });
+  const next = applyPassThroughGates(level, collectBits({ ...state, player }));
   const atDestination = isAtDestination(level, next);
   if (atDestination === state.atDestination) return next;
   return {
@@ -175,7 +231,6 @@ export function reorderCargo(state, cargoId, toIndex) {
 }
 
 function gateOutput(type, values) {
-  if (type === 'NOT') return values[0] === 0 ? 1 : 0;
   if (type === 'AND') return values.every((value) => value === 1) ? 1 : 0;
   return null;
 }
@@ -186,9 +241,10 @@ export function depositCargo(level, state, cargoId, target) {
   if (!cargo) return state;
 
   const gate = level.gates.find((item) => item.id === target.gateId);
-  const input = gate?.inputs.find((item) => item.id === target.inputId);
-  const currentGate = gate ? state.gateState[gate.id] : null;
-  if (!gate || !input || currentGate.inputs[input.id] !== undefined) return state;
+  if (!gate || isPassThroughGate(gate)) return state;
+  const input = gate.inputs?.find((item) => item.id === target.inputId);
+  const currentGate = state.gateState[gate.id];
+  if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
   const inputs = { ...currentGate.inputs, [input.id]: cargo.value };
   const complete = gate.inputs.every((item) => inputs[item.id] !== undefined);
@@ -196,11 +252,9 @@ export function depositCargo(level, state, cargoId, target) {
   const outputCargo = complete
     ? [{ id: `${gate.id}-output`, value: output }]
     : [];
-  const reason = gate.type === 'NOT'
-    ? `NOT flips ${cargo.value} to ${output}.`
-    : complete
-      ? `AND sees ${gate.inputs.map((item) => `${item.label}=${inputs[item.id]}`).join(', ')}; output is ${output}.`
-      : `${input.label} received ${cargo.value}. One distinct input remains.`;
+  const reason = complete
+    ? `${gate.type} sees ${gate.inputs.map((item) => `${item.label}=${inputs[item.id]}`).join(', ')}; output is ${output}.`
+    : `${input.label} received ${cargo.value}. One distinct input remains.`;
 
   return {
     ...state,
