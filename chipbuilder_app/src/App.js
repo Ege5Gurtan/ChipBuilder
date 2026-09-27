@@ -1,12 +1,21 @@
-import React, { useCallback, useState } from 'react';
-import ThreeScene from './ThreeScene.js';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { createGame, depositCargo, fabricate, fabricateCell, movePlayer, returnSignalBit } from './gameRules.js';
+import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, movePlayer, reorderCargo } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
+const DRAG_THRESHOLD = 4;
+
 function Bit({ value }) {
   return <span className={`bit bit-${value}`}>{value}</span>;
+}
+
+// Keep drag preview order in sync with cargo that changed mid-drag (e.g. a pickup).
+function mergeOrder(order, cargo) {
+  const ids = new Set(cargo.map((item) => item.id));
+  const kept = order.filter((id) => ids.has(id));
+  return [...kept, ...cargo.map((item) => item.id).filter((id) => !kept.includes(id))];
 }
 
 function App() {
@@ -15,22 +24,67 @@ function App() {
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
   const [selectedTool, setSelectedTool] = useState('lithography');
+  const [drag, setDrag] = useState(null);
+  const dragRef = useRef(null);
+  const pressRef = useRef(null);
+  const suppressClick = useRef(false);
+  const itemRefs = useRef(new Map());
+  const keyboardNav = useRef(false);
   const level = levels[levelIndex];
+  const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
+
+  const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
+
+  const resetUi = () => {
+    setSelectedCargoId(null);
+    pressRef.current = null;
+    updateDrag(null);
+  };
 
   const changeLevel = (index) => {
     setLevelIndex(index);
     setGame(createGame(levels[index]));
-    setSelectedCargoId(null);
+    resetUi();
   };
 
   const restart = () => {
     setGame(createGame(level));
-    setSelectedCargoId(null);
+    resetUi();
   };
 
   const handleMove = useCallback((movement) => {
     setGame((current) => movePlayer(level, current, movement));
   }, [level]);
+
+  const deliver = useCallback(() => {
+    setGame((current) => attemptSignalDelivery(level, current));
+  }, [level]);
+
+  const drop = useCallback(() => {
+    setGame((current) => dropCargoBit(level, current, selectedId));
+    setSelectedCargoId(null);
+  }, [level, selectedId]);
+
+  useEffect(() => {
+    const pointer = () => { keyboardNav.current = false; };
+    const keyDown = (event) => {
+      if (event.key === 'Tab') { keyboardNav.current = true; return; }
+      const key = event.key.toLowerCase();
+      if ((key !== 'enter' && key !== 'k') || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (editable(event.target)) return;
+      // Let keyboard-navigated controls keep their native Enter behaviour.
+      if (keyboardNav.current && event.target.closest?.('button, a, select, [role="button"]')) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (key === 'enter') deliver(); else drop();
+    };
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('pointerdown', pointer, true);
+    return () => {
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('pointerdown', pointer, true);
+    };
+  }, [deliver, drop]);
 
   const deposit = (cargoId, target) => {
     if (!cargoId) return;
@@ -38,11 +92,59 @@ function App() {
     setSelectedCargoId(null);
   };
 
-  const allowDrop = (event) => event.preventDefault();
-  const handleDrop = (event, target) => {
-    event.preventDefault();
-    deposit(event.dataTransfer.getData('text/plain'), target);
+  const socketAt = (x, y) => document.elementFromPoint(x, y)?.closest('[data-socket]:not(:disabled)')?.dataset.socket || null;
+
+  const cargoPointerDown = (event, id) => {
+    suppressClick.current = false;
+    if (event.button !== 0 || game.status !== 'playing') return;
+    pressRef.current = { id, x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
+
+  const cargoPointerMove = (event) => {
+    const press = pressRef.current;
+    if (!press) return;
+    const current = dragRef.current;
+    if (!current && Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_THRESHOLD) return;
+    const order = mergeOrder(current?.order || game.cargo.map((item) => item.id), game.cargo);
+    let closest = order.indexOf(press.id), best = Infinity;
+    order.forEach((id, index) => {
+      const rect = itemRefs.current.get(id)?.getBoundingClientRect();
+      if (!rect) return;
+      const distance = Math.hypot(event.clientX - (rect.left + rect.width / 2), event.clientY - (rect.top + rect.height / 2));
+      if (distance < best) { best = distance; closest = index; }
+    });
+    const next = order.filter((id) => id !== press.id);
+    next.splice(closest, 0, press.id);
+    updateDrag({ id: press.id, order: next, x: event.clientX, y: event.clientY, socket: socketAt(event.clientX, event.clientY) });
+  };
+
+  const cargoPointerUp = () => {
+    const current = dragRef.current;
+    pressRef.current = null;
+    if (!current) return;
+    suppressClick.current = true;
+    updateDrag(null);
+    if (current.socket) {
+      const [gateId, inputId] = current.socket.split(':');
+      deposit(current.id, { kind: 'gate', gateId, inputId });
+      return;
+    }
+    const index = mergeOrder(current.order, game.cargo).indexOf(current.id);
+    setGame((state) => reorderCargo(state, current.id, index));
+  };
+
+  const cargoPointerCancel = () => { pressRef.current = null; updateDrag(null); };
+
+  const cargoClick = (id) => {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    setSelectedCargoId((current) => (current === id ? null : id));
+  };
+
+  const displayedCargo = drag
+    ? mergeOrder(drag.order, game.cargo).map((id) => game.cargo.find((item) => item.id === id))
+    : game.cargo;
+  const draggedBit = drag && game.cargo.find((item) => item.id === drag.id);
 
   const runFabrication = (action) => {
     setGame((current) => fabricate(level, current, action));
@@ -87,11 +189,23 @@ function App() {
       <section className={`telemetry ${game.terrain ? 'terrain-telemetry' : ''}`} aria-label="Live signal status">
         <div>
           <span>Target signal</span>
-          <strong className="signal-value">{level.target}</strong>
+          <strong
+            key={game.feedback?.seq || 0}
+            className={`signal-value target-bits ${game.feedback ? `feedback-${game.feedback.kind}` : ''}`}
+            aria-label={`Target ${level.target}, ${game.targetSlots.filter((slot) => slot.delivered).length} of ${game.targetSlots.length} delivered`}
+          >
+            {game.targetSlots.map((slot, index) => (
+              <span key={index} className={`target-bit ${slot.delivered ? 'delivered' : ''}`}>{slot.value}</span>
+            ))}
+          </strong>
         </div>
         <div>
           <span>Current signal</span>
-          <strong className="signal-value">{game.signal.join('') || '—'}</strong>
+          <strong className="signal-value target-bits">
+            {game.targetSlots.map((slot, index) => (
+              <span key={index} className={slot.delivered ? '' : 'unresolved'}>{slot.delivered ? slot.value : '_'}</span>
+            ))}
+          </strong>
         </div>
         <div>
           <span>Cargo</span>
@@ -118,9 +232,18 @@ function App() {
           </div>
           <p className="lesson">{level.lesson}</p>
           <div className="controls-note">
-            <span>Movement</span>
-            <div className="key-row" aria-label="Use W A S D to move">
-              <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+            <span>Controls</span>
+            <div className="key-line">
+              <div className="key-row" aria-hidden="true"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div>
+              <small>Move</small>
+            </div>
+            <div className="key-line">
+              <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
+              <small>Drop selected cargo bit</small>
+            </div>
+            <div className="key-line">
+              <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
+              <small>Deliver cargo at DEST</small>
             </div>
           </div>
           <div className="touch-controls" aria-label="On-screen movement controls">
@@ -128,6 +251,8 @@ function App() {
             <button onClick={() => handleMove({ x: -0.35, y: 0 })} aria-label="Move left">←</button>
             <button onClick={() => handleMove({ x: 0, y: -0.35 })} aria-label="Move down">↓</button>
             <button onClick={() => handleMove({ x: 0.35, y: 0 })} aria-label="Move right">→</button>
+            <button onClick={drop} aria-label="Drop selected cargo bit">K</button>
+            <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>
           </div>
         </aside>
 
@@ -169,22 +294,34 @@ function App() {
               <span>01</span>
               <h3>Carrier cargo</h3>
             </div>
-            <p className="microcopy">Click a bit, then click a socket. Or drag it directly.</p>
-            <div className="cargo-row">
+            <p className="microcopy">
+              Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
+              {level.gates.length > 0 && ' Drag or click a bit onto a gate socket.'}
+            </p>
+            <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
               {game.cargo.length === 0 && <span className="empty-state">Move over a bit to collect it.</span>}
-              {game.cargo.map((item) => (
+              {displayedCargo.map((item, index) => (
                 <button
                   key={item.id}
-                  draggable
-                  className={`cargo-bit ${selectedCargoId === item.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedCargoId(item.id)}
-                  onDragStart={(event) => event.dataTransfer.setData('text/plain', item.id)}
-                  aria-label={`Cargo bit ${item.value}${selectedCargoId === item.id ? ', selected' : ''}`}
+                  ref={(element) => { if (element) itemRefs.current.set(item.id, element); else itemRefs.current.delete(item.id); }}
+                  className={`cargo-bit ${selectedId === item.id ? 'selected' : ''} ${drag?.id === item.id ? 'drag-placeholder' : ''}`}
+                  onClick={() => cargoClick(item.id)}
+                  onPointerDown={(event) => cargoPointerDown(event, item.id)}
+                  onPointerMove={cargoPointerMove}
+                  onPointerUp={cargoPointerUp}
+                  onPointerCancel={cargoPointerCancel}
+                  aria-label={`Cargo position ${index + 1}: bit ${item.value}${selectedId === item.id ? ', selected' : ''}`}
                 >
+                  <small className="cargo-index">{index + 1}</small>
                   <Bit value={item.value} />
                 </button>
               ))}
             </div>
+            {draggedBit && (
+              <div className="cargo-ghost" style={{ left: drag.x, top: drag.y }} aria-hidden="true">
+                <Bit value={draggedBit.value} />
+              </div>
+            )}
           </section>
 
           {level.gates.map((gate) => {
@@ -199,14 +336,14 @@ function App() {
                   <div className="gate-inputs">
                     {gate.inputs.map((input) => {
                       const value = currentGate.inputs[input.id];
+                      const socket = `${gate.id}:${input.id}`;
                       return (
                         <button
                           key={input.id}
-                          className="input-socket"
+                          data-socket={socket}
+                          className={`input-socket ${drag?.socket === socket ? 'drop-hover' : ''}`}
                           disabled={value !== undefined}
-                          onClick={() => deposit(selectedCargoId, { kind: 'gate', gateId: gate.id, inputId: input.id })}
-                          onDragOver={allowDrop}
-                          onDrop={(event) => handleDrop(event, { kind: 'gate', gateId: gate.id, inputId: input.id })}
+                          onClick={() => deposit(selectedId, { kind: 'gate', gateId: gate.id, inputId: input.id })}
                         >
                           <span>{input.label}</span>
                           {value === undefined ? 'drop' : <Bit value={value} />}
@@ -269,36 +406,24 @@ function App() {
             </section>
           )}
 
-          <section className="tool-section bucket-section">
+          <section className="tool-section delivery-section">
             <div className="section-heading">
               <span>{level.gates.length || level.fabrication ? '03' : '02'}</span>
-              <h3>Signal bucket</h3>
+              <h3>DEST delivery</h3>
             </div>
-            <div
-              className="signal-bucket"
-              role="button"
-              tabIndex={0}
-              aria-label="Deposit selected bit into signal bucket"
-              onClick={() => deposit(selectedCargoId, { kind: 'signal' })}
-              onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); deposit(selectedCargoId, { kind: 'signal' }); } }}
-              onDragOver={allowDrop}
-              onDrop={(event) => handleDrop(event, { kind: 'signal' })}
-            >
-              <span className="bucket-label">DEPOSIT</span>
-              <span className="bucket-bits">
-                {game.signal.length === 0 ? 'Drop or click here' : game.signal.map((value, index) => (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="placed-bit"
-                    key={`${value}-${index}`}
-                    aria-label={`Return signal bit ${value} to cargo`}
-                    onClick={(event) => { event.stopPropagation(); setGame((current) => returnSignalBit(current, index)); }}
-                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setGame((current) => returnSignalBit(current, index)); } }}
-                  ><Bit value={value} /></span>
-                ))}
-              </span>
+            <div className="slot-row" aria-label="Target slots">
+              {game.targetSlots.map((slot, index) => (
+                <span key={index} className={`target-slot ${slot.delivered ? 'delivered' : ''}`}>
+                  {slot.delivered && <i aria-hidden="true">✓</i>}{slot.value}
+                </span>
+              ))}
             </div>
+            <p className={`microcopy ${game.atDestination ? 'at-dest' : ''}`}>
+              {game.atDestination
+                ? 'Carrier at DEST. Press Enter to submit cargo.'
+                : 'Drive to DEST, then press Enter.'}
+              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
+            </p>
           </section>
         </aside>
       </div>

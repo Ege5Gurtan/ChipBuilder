@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
 
 const MOVE_SPEED = 3.15;
+const DEST_COLOR = new THREE.Color(0xffd16c);
+const PULSE_COLORS = { accept: new THREE.Color(0x6ee37a), partial: new THREE.Color(0x6ee37a), reject: new THREE.Color(0xf07162) };
+const PULSE_SECONDS = 0.6;
 const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, trench: 0x203143, rough: 0xad6635, metal: 0xe5ae50 };
 
 function label(text, color = '#ffffff') {
@@ -24,7 +27,7 @@ function orb(color, radius = 0.22) {
   return group;
 }
 
-function editable(target) {
+export function editable(target) {
   const tag = target?.tagName?.toLowerCase();
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
@@ -71,13 +74,16 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
     destination.position.set(level.destination.x, 0.9, -level.destination.y); scene.add(destination);
     const destLabel = label('DEST', '#ffd77d'); destLabel.position.y = 0.75; destination.add(destLabel);
     const player = orb(0x88eeff, 0.25); scene.add(player);
-    const pickups = new Map();
-    level.pickups.forEach((pickup) => {
-      const mesh = orb(pickup.value ? 0xffc87a : 0x72e2d4, 0.22);
-      mesh.position.set(pickup.x, 1.02, -pickup.y);
-      const text = label(String(pickup.value)); text.position.y = 0.53; mesh.add(text);
-      scene.add(mesh); pickups.set(pickup.id, mesh);
-    });
+    const destinationMaterials = destination.children.filter((child) => child.isMesh).map((child) => child.material);
+    const pulse = { color: null, start: 0 };
+    const bits = new Map();
+    const bitMesh = (bit) => {
+      if (bits.has(bit.id)) return bits.get(bit.id);
+      const mesh = orb(bit.value ? 0xffc87a : 0x72e2d4, 0.22);
+      const text = label(String(bit.value)); text.position.y = 0.53; mesh.add(text);
+      scene.add(mesh); bits.set(bit.id, mesh);
+      return mesh;
+    };
     const obstacles = new Map();
     level.obstacles.forEach((obstacle) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(obstacle.width, 0.8, obstacle.height), new THREE.MeshStandardMaterial({ color: obstacle.fabricationTarget ? 0xc75d43 : 0x596362 }));
@@ -88,7 +94,7 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       mesh.position.set(gate.x, 0.5, -gate.y); scene.add(mesh);
       const text = label(gate.type, '#f2d078'); text.position.set(gate.x, 1.12, -gate.y); scene.add(text);
     });
-    visuals.current = { player, pickups, obstacles, tiles, materials };
+    visuals.current = { player, bits, bitMesh, obstacles, tiles, materials, pulse, clock: null, feedbackSeq: 0 };
 
     const keys = new Set();
     const keyDown = (event) => {
@@ -143,6 +149,7 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
     };
     const observer = new ResizeObserver(resize); observer.observe(mount); resize();
     const clock = new THREE.Clock(); let animationFrame;
+    visuals.current.clock = clock;
     const animate = () => {
       animationFrame = requestAnimationFrame(animate);
       const delta = Math.min(clock.getDelta(), 0.05);
@@ -151,6 +158,12 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       if (x || y) { const length = Math.hypot(x, y); moveRef.current({ x: x / length * MOVE_SPEED * delta, y: y / length * MOVE_SPEED * delta }); }
       player.rotation.y += delta * 0.7;
       destination.rotation.y -= delta * 0.5;
+      if (pulse.color) {
+        const t = Math.min(1, (clock.elapsedTime - pulse.start) / PULSE_SECONDS);
+        destinationMaterials.forEach((material) => material.color.copy(pulse.color).lerp(DEST_COLOR, t));
+        destination.scale.setScalar(1 + 0.35 * Math.sin(t * Math.PI));
+        if (t >= 1) pulse.color = null;
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -176,7 +189,19 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
     const refs = visuals.current;
     if (!refs) return;
     refs.player.position.set(game.player.x, 1.08, -game.player.y);
-    refs.pickups.forEach((mesh, id) => { mesh.visible = !game.collectedIds.includes(id); });
+    const present = new Set();
+    game.worldBits.forEach((bit) => {
+      const mesh = refs.bitMesh(bit);
+      mesh.visible = true; mesh.position.set(bit.x, 1.02, -bit.y);
+      mesh.scale.setScalar(bit.armed ? 1 : 0.8);
+      present.add(bit.id);
+    });
+    refs.bits.forEach((mesh, id) => { if (!present.has(id)) mesh.visible = false; });
+    const seq = game.feedback?.seq || 0;
+    if (seq !== refs.feedbackSeq) {
+      refs.feedbackSeq = seq;
+      if (game.feedback) { refs.pulse.color = PULSE_COLORS[game.feedback.kind]; refs.pulse.start = refs.clock.elapsedTime; }
+    }
     refs.obstacles.forEach((mesh, id) => {
       const obstacle = level.obstacles.find((item) => item.id === id);
       mesh.visible = obstacle?.permanent || !game.fabrication.etched;

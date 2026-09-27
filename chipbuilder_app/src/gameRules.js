@@ -3,15 +3,18 @@ import { createTerrain, FAB_TOOLS, terrainMaterial } from './terrain.js';
 export const PLAYER_RADIUS = 0.34;
 export const PICKUP_RADIUS = 0.62;
 export const DESTINATION_RADIUS = 0.72;
+const DROP_DISTANCE = 0.45;
 
 export function createGame(level) {
   return {
     levelId: level.id,
     player: { ...level.start },
     cargo: [],
-    signal: [],
-    returnCounter: 0,
-    collectedIds: [],
+    targetSlots: level.target.split('').map((bit) => ({ value: Number(bit), delivered: false })),
+    // armed=false marks a freshly dropped bit that cannot be collected until the carrier leaves it.
+    worldBits: level.pickups.map(({ id, value, x, y }) => ({ id, value, x, y, armed: true })),
+    atDestination: false,
+    feedback: null,
     gateState: Object.fromEntries(
       level.gates.map((gate) => [gate.id, { inputs: {}, output: null }])
     ),
@@ -38,61 +41,137 @@ function activeObstacles(level, state) {
   );
 }
 
-function collectBits(level, state) {
-  const newlyCollected = level.pickups.filter((pickup) => {
-    if (state.collectedIds.includes(pickup.id)) return false;
-    return Math.hypot(state.player.x - pickup.x, state.player.y - pickup.y) <= PICKUP_RADIUS;
-  });
+const clampToWafer = (position) => ({
+  x: Math.max(-5.65, Math.min(5.65, position.x)),
+  y: Math.max(-4.15, Math.min(4.15, position.y)),
+});
 
-  if (!newlyCollected.length) return state;
-
-  return {
-    ...state,
-    cargo: [...state.cargo, ...newlyCollected.map(({ id, value }) => ({ id, value }))],
-    collectedIds: [...state.collectedIds, ...newlyCollected.map(({ id }) => id)],
-    cost: { ...state.cost, energy: state.cost.energy + newlyCollected.length },
-    message: `Collected ${newlyCollected.map(({ value }) => value).join(', ')}. Deposit cargo by click or drag.`,
-  };
+function isWalkable(level, state, position) {
+  const blocked = state.terrain && ['oxide', 'trench', 'rough'].includes(terrainMaterial(state.terrain, position.x, position.y));
+  return !blocked && !activeObstacles(level, state).some((obstacle) => overlapsObstacle(position, obstacle));
 }
 
-function evaluateDestination(level, state) {
-  const distance = Math.hypot(
-    state.player.x - level.destination.x,
-    state.player.y - level.destination.y
-  );
-  if (distance > DESTINATION_RADIUS || state.status !== 'playing') return state;
+export function isAtDestination(level, state) {
+  return Math.hypot(state.player.x - level.destination.x, state.player.y - level.destination.y) <= DESTINATION_RADIUS;
+}
 
-  const actual = state.signal.join('');
-  if (actual === level.target) {
-    return {
-      ...state,
-      status: 'success',
-      message: `Signal ${actual} matches target ${level.target}. Delivery accepted.`,
-    };
+export function collectBits(state) {
+  const distanceTo = (bit) => Math.hypot(state.player.x - bit.x, state.player.y - bit.y);
+  const worldBits = state.worldBits.map((bit) => (
+    !bit.armed && distanceTo(bit) > PICKUP_RADIUS ? { ...bit, armed: true } : bit
+  ));
+  const newlyCollected = worldBits.filter((bit) => bit.armed && distanceTo(bit) <= PICKUP_RADIUS);
+
+  if (!newlyCollected.length) {
+    return worldBits.some((bit, index) => bit !== state.worldBits[index]) ? { ...state, worldBits } : state;
   }
 
-  const explanation = actual.length === 0
-    ? 'The signal bucket is empty.'
-    : actual.length !== level.target.length
-      ? `Expected ${level.target.length} bit${level.target.length === 1 ? '' : 's'}, received ${actual.length}.`
-      : `Bit order/value mismatch: received ${actual}, expected ${level.target}.`;
-
-  return { ...state, message: `Delivery rejected. ${explanation} You can still correct the bucket.` };
+  const cargo = [...state.cargo, ...newlyCollected.map(({ id, value }) => ({ id, value }))];
+  return {
+    ...state,
+    cargo,
+    worldBits: worldBits.filter((bit) => !newlyCollected.includes(bit)),
+    cost: { ...state.cost, energy: state.cost.energy + newlyCollected.length },
+    message: `Collected ${newlyCollected.map(({ value }) => value).join(', ')}. Cargo order: ${cargo.map(({ value }) => value).join(' ')}.`,
+  };
 }
 
 export function movePlayer(level, state, movement) {
   if (state.status !== 'playing') return state;
 
-  const candidate = {
-    x: Math.max(-5.65, Math.min(5.65, state.player.x + movement.x)),
-    y: Math.max(-4.15, Math.min(4.15, state.player.y + movement.y)),
+  const candidate = clampToWafer({ x: state.player.x + movement.x, y: state.player.y + movement.y });
+  const player = isWalkable(level, state, candidate) ? candidate : state.player;
+  const next = collectBits({ ...state, player });
+  const atDestination = isAtDestination(level, next);
+  if (atDestination === state.atDestination) return next;
+  return {
+    ...next,
+    atDestination,
+    message: atDestination
+      ? 'At DEST. Press Enter to submit cargo left → right.'
+      : next.message,
   };
-  const blocked = state.terrain && ['oxide', 'trench', 'rough'].includes(terrainMaterial(state.terrain, candidate.x, candidate.y));
-  const player = blocked || activeObstacles(level, state).some((obstacle) => overlapsObstacle(candidate, obstacle))
-    ? state.player
-    : candidate;
+}
 
-  return evaluateDestination(level, collectBits(level, { ...state, player }));
+export function attemptSignalDelivery(level, state) {
+  if (state.status !== 'playing') return state;
+  if (!isAtDestination(level, state)) {
+    return { ...state, message: 'Delivery needs the carrier at DEST. Nothing was deposited.' };
+  }
+  if (!state.cargo.length) {
+    return { ...state, message: 'Cargo is empty. Collect bits before delivering.' };
+  }
+
+  // Pair cargo[i] with the i-th undelivered slot; decide everything before mutating.
+  const openSlots = state.targetSlots
+    .map((slot, index) => ({ ...slot, index }))
+    .filter((slot) => !slot.delivered);
+  const acceptedIds = new Set();
+  const acceptedSlots = new Set();
+  state.cargo.forEach((item, i) => {
+    const slot = openSlots[i];
+    if (slot && slot.value === item.value) {
+      acceptedIds.add(item.id);
+      acceptedSlots.add(slot.index);
+    }
+  });
+
+  const seq = (state.feedback?.seq || 0) + 1;
+  if (!acceptedIds.size) {
+    return {
+      ...state,
+      feedback: { kind: 'reject', seq },
+      message: `No match: open slots expect ${openSlots.map(({ value }) => value).join(' ')}, cargo is ${state.cargo.map(({ value }) => value).join(' ')}. Bits stay in cargo.`,
+    };
+  }
+
+  const targetSlots = state.targetSlots.map((slot, index) => (
+    acceptedSlots.has(index) ? { ...slot, delivered: true } : slot
+  ));
+  const cargo = state.cargo.filter((item) => !acceptedIds.has(item.id));
+  const complete = targetSlots.every((slot) => slot.delivered);
+  const rejected = Math.min(state.cargo.length, openSlots.length) - acceptedIds.size;
+  const signal = targetSlots.map((slot) => (slot.delivered ? slot.value : '_')).join(' ');
+
+  return {
+    ...state,
+    cargo,
+    targetSlots,
+    feedback: { kind: complete || !rejected ? 'accept' : 'partial', seq },
+    cost: { ...state.cost, energy: state.cost.energy + acceptedIds.size },
+    status: complete ? 'success' : state.status,
+    message: complete
+      ? `Signal ${level.target} complete. Every target slot received the correct bit.`
+      : `Accepted ${acceptedIds.size} bit${acceptedIds.size === 1 ? '' : 's'}. Signal: ${signal}.${rejected ? ` ${rejected} mismatching bit${rejected === 1 ? '' : 's'} stayed in cargo.` : ''}`,
+  };
+}
+
+export function dropCargoBit(level, state, cargoId) {
+  if (state.status !== 'playing' || !state.cargo.length) return state;
+  const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
+  const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+  const spot = directions
+    .map(([dx, dy]) => {
+      const length = Math.hypot(dx, dy);
+      return clampToWafer({ x: state.player.x + dx / length * DROP_DISTANCE, y: state.player.y + dy / length * DROP_DISTANCE });
+    })
+    .find((position) => isWalkable(level, state, position)) || { ...state.player };
+
+  return {
+    ...state,
+    cargo: state.cargo.filter((bit) => bit.id !== item.id),
+    worldBits: [...state.worldBits, { id: item.id, value: item.value, ...spot, armed: false }],
+    message: `Dropped ${item.value} onto the wafer. Move away and return to collect it again.`,
+  };
+}
+
+export function reorderCargo(state, cargoId, toIndex) {
+  const fromIndex = state.cargo.findIndex((item) => item.id === cargoId);
+  if (fromIndex < 0 || fromIndex === toIndex) return state;
+  const cargo = state.cargo.slice();
+  const [item] = cargo.splice(fromIndex, 1);
+  cargo.splice(Math.max(0, Math.min(toIndex, cargo.length)), 0, item);
+  return { ...state, cargo, message: `Cargo order: ${cargo.map(({ value }) => value).join(' ')}.` };
 }
 
 function gateOutput(type, values) {
@@ -105,16 +184,6 @@ export function depositCargo(level, state, cargoId, target) {
   if (state.status !== 'playing') return state;
   const cargo = state.cargo.find((item) => item.id === cargoId);
   if (!cargo) return state;
-
-  if (target.kind === 'signal') {
-    return {
-      ...state,
-      cargo: state.cargo.filter((item) => item.id !== cargoId),
-      signal: [...state.signal, cargo.value],
-      cost: { ...state.cost, energy: state.cost.energy + 1 },
-      message: `Deposited ${cargo.value}. Current signal: ${[...state.signal, cargo.value].join('')}.`,
-    };
-  }
 
   const gate = level.gates.find((item) => item.id === target.gateId);
   const input = gate?.inputs.find((item) => item.id === target.inputId);
@@ -142,19 +211,6 @@ export function depositCargo(level, state, cargoId, target) {
     },
     cost: { ...state.cost, energy: state.cost.energy + 2 },
     message: reason,
-  };
-}
-
-export function returnSignalBit(state, index) {
-  if (state.status !== 'playing' || index < 0 || index >= state.signal.length) return state;
-  const signal = state.signal.slice();
-  const value = signal.splice(index, 1)[0];
-  return {
-    ...state,
-    signal,
-    cargo: [...state.cargo, { id: `returned-${state.returnCounter}`, value }],
-    returnCounter: state.returnCounter + 1,
-    message: `Returned ${value} to cargo. Rebuild the signal in the correct order.`,
   };
 }
 
