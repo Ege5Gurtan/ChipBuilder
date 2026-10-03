@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo } from './gameRules.js';
+import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -23,6 +23,7 @@ function App() {
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
   const [selectedTool, setSelectedTool] = useState('lithography');
+  const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
   const pressRef = useRef(null);
@@ -39,6 +40,8 @@ function App() {
 
   const resetUi = () => {
     setSelectedCargoId(null);
+    setSelectedTool('lithography');
+    setCmpHeight(1);
     pressRef.current = null;
     updateDrag(null);
   };
@@ -72,6 +75,12 @@ function App() {
     const keyDown = (event) => {
       if (event.key === 'Tab') { keyboardNav.current = true; return; }
       const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.altKey) {
+        if (editable(event.target)) return;
+        event.preventDefault();
+        if (!event.repeat) setGame((current) => undoTerrainEdit(current));
+        return;
+      }
       if ((key !== 'enter' && key !== 'k') || event.ctrlKey || event.metaKey || event.altKey) return;
       if (editable(event.target)) return;
       // Let keyboard-navigated controls keep their native Enter behaviour.
@@ -167,7 +176,7 @@ function App() {
   };
 
   const paintTerrain = (col, row, newStroke) => {
-    setGame((current) => fabricateCell(current, selectedTool, col, row, newStroke));
+    setGame((current) => fabricateCell(current, selectedTool, col, row, newStroke, cmpHeight));
   };
 
   const nextLevel = () => {
@@ -259,6 +268,12 @@ function App() {
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
               <small>Deliver cargo at DEST</small>
             </div>
+            {game.terrain && (
+              <div className="key-line">
+                <div className="key-row" aria-hidden="true"><kbd className="wide-key">Ctrl+Z</kbd></div>
+                <small>Undo last fabrication stroke</small>
+              </div>
+            )}
           </div>
           <div className="touch-controls" aria-label="On-screen movement controls">
             <button onClick={() => handleMove({ x: 0, y: 0.35 })} aria-label="Move up">↑</button>
@@ -280,6 +295,7 @@ function App() {
             onGateSocketClick={interactWithGateSocket}
             hoveredSocket={drag?.socket || null}
             tool={selectedTool}
+            cmpHeight={cmpHeight}
           />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
@@ -407,7 +423,7 @@ function App() {
           {game.terrain && (
             <section className="tool-section fabrication-section">
               <div className="section-heading"><span>02</span><h3>Fabrication · mouse drag</h3></div>
-              <p className="microcopy">Select a process, then draw on the wafer. WASD keeps moving the electron.</p>
+              <p className="microcopy">Paint any region with Lithography, then reshape it with Etch, Deposit or CMP. WASD keeps moving the electron.</p>
               {Object.entries(FAB_TOOLS).map(([key, tool]) => (
                 <button
                   key={key}
@@ -418,7 +434,24 @@ function App() {
                   <span>{tool.label}</span><small>{tool.base} + {tool.cell}/tile credits</small>
                 </button>
               ))}
-              <p className="microcopy">Purple oxide → mask → etch. Dark trench → deposit → CMP.</p>
+              {selectedTool === 'cmp' && (
+                <label className="cmp-target">
+                  <span>CMP target height</span>
+                  <select value={cmpHeight} onChange={(event) => setCmpHeight(Number(event.target.value))}>
+                    <option value={0}>0</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                </label>
+              )}
+              <button
+                className="undo-fab"
+                onClick={() => setGame((current) => undoTerrainEdit(current))}
+                disabled={!game.terrainHistory.length}
+              >
+                <span>Undo last stroke</span><small>Ctrl+Z</small>
+              </button>
+              <p className="microcopy">Height 1 is walkable. Height 0 is a trench; height 2+ is a wall.</p>
             </section>
           )}
 

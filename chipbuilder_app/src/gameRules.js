@@ -1,4 +1,4 @@
-import { createTerrain, FAB_TOOLS, terrainMaterial } from './terrain.js';
+import { BASE_HEIGHT, createTerrain, FAB_TOOLS, MAX_HEIGHT, MIN_HEIGHT, terrainHeight } from './terrain.js';
 
 export const PLAYER_RADIUS = 0.34;
 export const PICKUP_RADIUS = 0.62;
@@ -58,6 +58,7 @@ export function createGame(level) {
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain ? createTerrain() : null,
+    terrainHistory: [],
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
     status: 'playing',
     message: 'Carrier online. Follow the goal and deliver the exact target signal.',
@@ -85,7 +86,7 @@ const clampToWafer = (position) => ({
 });
 
 function isWalkable(level, state, position) {
-  const blocked = state.terrain && ['oxide', 'trench', 'rough'].includes(terrainMaterial(state.terrain, position.x, position.y));
+  const blocked = state.terrain && terrainHeight(state.terrain, position.x, position.y) !== BASE_HEIGHT;
   return !blocked && !activeObstacles(level, state).some((obstacle) => overlapsObstacle(position, obstacle));
 }
 
@@ -415,37 +416,77 @@ export function fabricate(level, state, action) {
   return state;
 }
 
-export function fabricateCell(state, action, col, row, newStroke) {
+export function canFabricateCell(state, action, col, row, cmpHeight = BASE_HEIGHT) {
+  if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return false;
+  const cell = state.terrain[row]?.[col];
+  if (!cell) return false;
+  const target = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Number(cmpHeight)));
+  if (action === 'lithography') return !cell.masked;
+  if (action === 'etch') return cell.masked && cell.height > MIN_HEIGHT;
+  if (action === 'deposit') return cell.masked && cell.height < MAX_HEIGHT;
+  return cell.masked && cell.height > target;
+}
+
+export function undoTerrainEdit(state) {
+  if (state.status !== 'playing' || !state.terrainHistory?.length) return state;
+  const previous = state.terrainHistory[state.terrainHistory.length - 1];
+  return {
+    ...state,
+    terrain: previous.terrain,
+    cost: previous.cost,
+    terrainHistory: state.terrainHistory.slice(0, -1),
+    message: 'Undid the last fabrication stroke.',
+  };
+}
+
+export function fabricateCell(state, action, col, row, newStroke, cmpHeight = BASE_HEIGHT) {
   if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return state;
   const cell = state.terrain[row]?.[col];
   if (!cell) return state;
-  const allowed = action === 'lithography' ? cell.type === 'oxide' && !cell.masked
-    : action === 'etch' ? cell.type === 'oxide' && cell.masked
-    : action === 'deposit' ? cell.type === 'trench'
-    : cell.type === 'rough';
-  if (!allowed) {
+
+  const target = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Number(cmpHeight)));
+  if (!canFabricateCell(state, action, col, row, target)) {
     const hint = {
-      lithography: 'Lithography patterns purple oxide.',
-      etch: 'Etch needs a yellow lithography mask on oxide.',
-      deposit: 'Deposit fills the dark trench with rough copper.',
-      cmp: 'CMP polishes deposited copper.',
+      lithography: 'Lithography paints regions that the other fabrication tools can edit.',
+      etch: 'Etch lowers patterned terrain by one height level.',
+      deposit: 'Deposit raises patterned terrain by one height level.',
+      cmp: `CMP only lowers patterned terrain that is above height ${target}.`,
     };
     return state.message === hint[action] ? state : { ...state, message: hint[action] };
   }
+
+  let nextCell;
+  if (action === 'lithography') {
+    nextCell = { ...cell, masked: true };
+  } else if (action === 'etch') {
+    const height = Math.max(MIN_HEIGHT, cell.height - 1);
+    nextCell = { ...cell, height, material: height <= BASE_HEIGHT ? 'silicon' : cell.material };
+  } else if (action === 'deposit') {
+    nextCell = { ...cell, height: Math.min(MAX_HEIGHT, cell.height + 1), material: 'deposit' };
+  } else {
+    nextCell = { ...cell, height: target, material: target <= BASE_HEIGHT ? 'silicon' : cell.material };
+  }
+
   const terrain = state.terrain.map((cells, index) => index === row ? cells.slice() : cells);
-  terrain[row][col] = {
-    type: action === 'etch' ? 'silicon' : action === 'deposit' ? 'rough' : action === 'cmp' ? 'metal' : cell.type,
-    masked: action === 'lithography',
-  };
+  terrain[row][col] = nextCell;
   const cost = FAB_TOOLS[action];
+  const terrainHistory = newStroke
+    ? [...state.terrainHistory.slice(-39), { terrain: state.terrain, cost: state.cost }]
+    : state.terrainHistory;
+  const strokeCost = cost.cell + (newStroke ? cost.base : 0);
+  const detail = action === 'lithography'
+    ? 'Pattern painted.'
+    : `Height ${cell.height} → ${nextCell.height}.`;
+
   return {
     ...state,
     terrain,
+    terrainHistory,
     cost: {
       ...state.cost,
       processSteps: state.cost.processSteps + Number(newStroke),
-      manufacturing: state.cost.manufacturing + cost.cell + (newStroke ? cost.base : 0),
+      manufacturing: state.cost.manufacturing + strokeCost,
     },
-    message: `${cost.label} changed the wafer. +${cost.cell + (newStroke ? cost.base : 0)} credits.`,
+    message: `${cost.label}: ${detail} +${strokeCost} credits.`,
   };
 }

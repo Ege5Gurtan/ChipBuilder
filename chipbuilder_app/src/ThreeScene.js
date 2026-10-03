@@ -1,14 +1,14 @@
 import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
-import { TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
-import { GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
+import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
+import { canFabricateCell, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
 const GATE_PULSE_COLOR = new THREE.Color(0xffd16c);
 const PULSE_COLORS = { accept: new THREE.Color(0x6ee37a), partial: new THREE.Color(0x6ee37a), reject: new THREE.Color(0xf07162) };
 const PULSE_SECONDS = 0.6;
-const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, trench: 0x203143, rough: 0xad6635, metal: 0xe5ae50 };
+const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, deposit: 0xc97845 };
 
 function label(text, color = '#ffffff') {
   const canvas = document.createElement('canvas');
@@ -34,12 +34,13 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, tool }, ref) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, tool, cmpHeight }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
   const paintRef = useRef(onPaint);
   const gateSocketClickRef = useRef(onGateSocketClick);
   const toolRef = useRef(tool);
+  const cmpHeightRef = useRef(cmpHeight);
   const gameRef = useRef(game);
   const visuals = useRef(null);
   useEffect(() => {
@@ -47,6 +48,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     paintRef.current = onPaint;
     gateSocketClickRef.current = onGateSocketClick;
     toolRef.current = tool;
+    cmpHeightRef.current = cmpHeight;
     gameRef.current = game;
   });
 
@@ -91,7 +93,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const tileMeshes = [];
     const tiles = [];
     const tileGeometry = new THREE.BoxGeometry(TILE_WIDTH * 0.97, 1, TILE_DEPTH * 0.97);
-    const materials = Object.fromEntries(Object.entries(tileColors).map(([name, color]) => [name, new THREE.MeshStandardMaterial({ color, roughness: name === 'metal' ? 0.3 : 0.68, metalness: name === 'metal' ? 0.6 : 0.12 })]));
+    const materials = Object.fromEntries(Object.entries(tileColors).map(([name, color]) => [name, new THREE.MeshStandardMaterial({ color, roughness: name === 'deposit' ? 0.4 : 0.68, metalness: name === 'deposit' ? 0.45 : 0.12 })]));
     const maskMaterial = new THREE.MeshBasicMaterial({ color: 0xffd56a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
     for (let row = 0; row < TERRAIN_ROWS; row++) for (let col = 0; col < TERRAIN_COLUMNS; col++) {
       const mesh = new THREE.Mesh(tileGeometry, materials.silicon);
@@ -226,12 +228,8 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const id = `${col}:${row}`;
       if (touched.has(id)) return;
       touched.add(id);
-      const cell = gameRef.current.terrain[row]?.[col];
       const action = toolRef.current;
-      const valid = action === 'lithography' ? cell?.type === 'oxide' && !cell.masked
-        : action === 'etch' ? cell?.type === 'oxide' && cell.masked
-        : action === 'deposit' ? cell?.type === 'trench'
-        : cell?.type === 'rough';
+      const valid = canFabricateCell(gameRef.current, action, col, row, cmpHeightRef.current);
       paintRef.current(col, row, !strokeStarted);
       if (valid) strokeStarted = true;
     };
@@ -379,10 +377,12 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     });
     refs.tiles.forEach(({ mesh, mask }, index) => {
       const row = Math.floor(index / TERRAIN_COLUMNS), col = index % TERRAIN_COLUMNS;
-      const cell = game.terrain?.[row]?.[col] || { type: 'silicon', masked: false };
-      mesh.material = refs.materials[cell.type]; mask.visible = cell.masked;
-      const heights = { silicon: 0.48, oxide: 1.13, trench: 0.13, rough: 0.81, metal: 0.59 };
-      mesh.scale.y = heights[cell.type]; mesh.position.y = heights[cell.type] / 2;
+      const cell = game.terrain?.[row]?.[col] || { height: BASE_HEIGHT, material: 'silicon', masked: false };
+      mesh.material = refs.materials[cell.material] || refs.materials.silicon;
+      mask.visible = cell.masked;
+      const displayHeight = 0.12 + cell.height * 0.44;
+      mesh.scale.y = displayHeight;
+      mesh.position.y = displayHeight / 2;
     });
   }, [game, hoveredSocket, level]);
 

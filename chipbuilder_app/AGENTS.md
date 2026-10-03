@@ -3,7 +3,7 @@
 ## Repository and current state
 
 - Repository: `Ege5Gurtan/ChipBuilder`.
-- The web app lives in `chipbuilder_app/`. It uses React, JavaScript, Create React App, and Three.js. `levels.js` defines four missions; `gameRules.js` owns gameplay state and `terrain.js` defines the first mission's tile materials and process costs. `ThreeScene.js` renders a tilted 3D wafer and handles mouse painting and WASD movement; `App.js` renders the HUD and tool controls.
+- The web app lives in `chipbuilder_app/`. It uses React, JavaScript, Create React App, and Three.js. `levels.js` defines four missions; `gameRules.js` owns gameplay state and terrain edit history, while `terrain.js` defines the first mission's discrete height grid and process costs. `ThreeScene.js` renders a tilted 3D wafer and handles mouse painting and WASD movement; `App.js` renders the HUD and tool controls.
 - Read the current repository before changing code. Keep this file aligned with the implementation as the project evolves; distinguish intended features from features that actually exist.
 
 ## Game vision
@@ -29,7 +29,7 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 ## Levels and scoring
 
 - All level buttons are directly selectable during development/playtesting; players do not need to replay earlier levels to reach a later mission.
-- Current level 01 has a full wafer grid with oxide and trench barriers. Lithography, etch, copper deposition and CMP are selected in the sidebar and painted on the wafer with the mouse. Each valid stroke and affected tile contributes to manufacturing cost. The other three levels retain their existing gate and fixed-channel rules. All levels deliver signals via Enter at DEST.
+- Current level 01 uses a freely editable discrete-height wafer. Lithography can pattern any tile; Etch lowers patterned tiles, Deposit raises them, and CMP lowers them to a selected target height. Height 1 is walkable, height 0 is a trench, and height 2+ is blocked terrain. Ctrl+Z or the Undo button restores the previous fabrication stroke and its cost. The other three levels retain their existing gate and fixed-channel rules. All levels deliver signals via Enter at DEST.
 
 - Start with a small playable loop: move the carrier, collect bits, deposit a signal, validate it against a target, and receive clear success or failure feedback.
 - Add fabrication actions and circuit elements incrementally as the loop becomes playable. Level goals should be explicit and build on earlier mechanics.
