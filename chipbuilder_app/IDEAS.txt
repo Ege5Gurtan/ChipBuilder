@@ -1,0 +1,10 @@
+
+
+---WIRES---
+
+Deposit copper on trenches to build wires. 
+Wires can be used to transport bits from one end to the other. 
+
+Not sure:
+Should we build input and output socket to wires? Or should wire directly send the bit from one end to the other?
+But then how do we define the direction of the flow? 
