@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
+import { applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -22,7 +22,6 @@ function App() {
   const [levelIndex, setLevelIndex] = useState(0);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
-  const [selectedTool, setSelectedTool] = useState('lithography');
   const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
@@ -40,7 +39,6 @@ function App() {
 
   const resetUi = () => {
     setSelectedCargoId(null);
-    setSelectedTool('lithography');
     setCmpHeight(1);
     pressRef.current = null;
     updateDrag(null);
@@ -176,7 +174,11 @@ function App() {
   };
 
   const paintTerrain = (col, row, newStroke) => {
-    setGame((current) => fabricateCell(current, selectedTool, col, row, newStroke, cmpHeight));
+    setGame((current) => fabricateCell(current, 'lithography', col, row, newStroke));
+  };
+
+  const runTerrainProcess = (action) => {
+    setGame((current) => applyTerrainProcess(current, action, cmpHeight));
   };
 
   const nextLevel = () => {
@@ -294,8 +296,6 @@ function App() {
             onPaint={paintTerrain}
             onGateSocketClick={interactWithGateSocket}
             hoveredSocket={drag?.socket || null}
-            tool={selectedTool}
-            cmpHeight={cmpHeight}
           />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
@@ -422,34 +422,46 @@ function App() {
 
           {game.terrain && (
             <section className="tool-section fabrication-section">
-              <div className="section-heading"><span>02</span><h3>Fabrication · mouse drag</h3></div>
-              <p className="microcopy">Paint any region with Lithography, then reshape it with Etch, Deposit or CMP. WASD keeps moving the electron.</p>
-              {Object.entries(FAB_TOOLS).map(([key, tool]) => (
-                <button
-                  key={key}
-                  className={selectedTool === key ? 'fab-done' : ''}
-                  onClick={() => setSelectedTool(key)}
-                  aria-pressed={selectedTool === key}
-                >
-                  <span>{tool.label}</span><small>{tool.base} + {tool.cell}/tile credits</small>
-                </button>
-              ))}
-              {selectedTool === 'cmp' && (
-                <label className="cmp-target">
-                  <span>CMP target height</span>
-                  <select value={cmpHeight} onChange={(event) => setCmpHeight(Number(event.target.value))}>
-                    <option value={0}>0</option>
-                    <option value={1}>1</option>
-                    <option value={2}>2</option>
-                  </select>
-                </label>
-              )}
+              <div className="section-heading"><span>02</span><h3>Fabrication</h3></div>
+              <p className="microcopy"><b>1 · Lithography:</b> drag on the wafer to build one active mask. Add as many brush strokes as you need before running a process.</p>
+              <div className="mask-status">
+                <span>Active mask</span>
+                <strong>{game.terrain.flat().filter((cell) => cell.masked).length} tiles</strong>
+              </div>
+
+              <p className="microcopy process-label"><b>2 · Process the mask</b></p>
+              <button
+                onClick={() => runTerrainProcess('etch')}
+                disabled={!game.terrain.some((row) => row.some((cell) => cell.masked))}
+              >
+                <span>Etch patterned tiles</span><small>{FAB_TOOLS.etch.base} + {FAB_TOOLS.etch.cell}/tile</small>
+              </button>
+              <button
+                onClick={() => runTerrainProcess('deposit')}
+                disabled={!game.terrain.some((row) => row.some((cell) => cell.masked))}
+              >
+                <span>Deposit on patterned tiles</span><small>{FAB_TOOLS.deposit.base} + {FAB_TOOLS.deposit.cell}/tile</small>
+              </button>
+              <p className="microcopy">Etch or Deposit applies to the whole yellow mask at once, then clears that mask.</p>
+
+              <label className="cmp-target">
+                <span>CMP target height</span>
+                <select value={cmpHeight} onChange={(event) => setCmpHeight(Number(event.target.value))}>
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                </select>
+              </label>
+              <button onClick={() => runTerrainProcess('cmp')}>
+                <span>Run CMP globally</span><small>{FAB_TOOLS.cmp.base} + {FAB_TOOLS.cmp.cell}/changed tile</small>
+              </button>
+
               <button
                 className="undo-fab"
                 onClick={() => setGame((current) => undoTerrainEdit(current))}
                 disabled={!game.terrainHistory.length}
               >
-                <span>Undo last stroke</span><small>Ctrl+Z</small>
+                <span>Undo last action</span><small>Ctrl+Z</small>
               </button>
               <p className="microcopy">Height 1 is walkable. Height 0 is a trench; height 2+ is a wall.</p>
             </section>

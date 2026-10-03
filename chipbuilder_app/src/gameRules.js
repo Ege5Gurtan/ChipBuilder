@@ -416,15 +416,21 @@ export function fabricate(level, state, action) {
   return state;
 }
 
-export function canFabricateCell(state, action, col, row, cmpHeight = BASE_HEIGHT) {
-  if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return false;
+export function canFabricateCell(state, action, col, row) {
+  if (state.status !== 'playing' || !state.terrain || action !== 'lithography') return false;
   const cell = state.terrain[row]?.[col];
-  if (!cell) return false;
-  const target = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Number(cmpHeight)));
-  if (action === 'lithography') return !cell.masked;
-  if (action === 'etch') return cell.masked && cell.height > MIN_HEIGHT;
-  if (action === 'deposit') return cell.masked && cell.height < MAX_HEIGHT;
-  return cell.masked && cell.height > target;
+  return Boolean(cell && !cell.masked);
+}
+
+function terrainSnapshot(state) {
+  return {
+    terrain: state.terrain,
+    cost: state.cost,
+  };
+}
+
+function pushTerrainHistory(state) {
+  return [...state.terrainHistory.slice(-39), terrainSnapshot(state)];
 }
 
 export function undoTerrainEdit(state) {
@@ -435,58 +441,119 @@ export function undoTerrainEdit(state) {
     terrain: previous.terrain,
     cost: previous.cost,
     terrainHistory: state.terrainHistory.slice(0, -1),
-    message: 'Undid the last fabrication stroke.',
+    message: 'Undid the last fabrication action.',
   };
 }
 
-export function fabricateCell(state, action, col, row, newStroke, cmpHeight = BASE_HEIGHT) {
-  if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return state;
-  const cell = state.terrain[row]?.[col];
-  if (!cell) return state;
-
-  const target = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Number(cmpHeight)));
-  if (!canFabricateCell(state, action, col, row, target)) {
-    const hint = {
-      lithography: 'Lithography paints regions that the other fabrication tools can edit.',
-      etch: 'Etch lowers patterned terrain by one height level.',
-      deposit: 'Deposit raises patterned terrain by one height level.',
-      cmp: `CMP only lowers patterned terrain that is above height ${target}.`,
-    };
-    return state.message === hint[action] ? state : { ...state, message: hint[action] };
-  }
-
-  let nextCell;
-  if (action === 'lithography') {
-    nextCell = { ...cell, masked: true };
-  } else if (action === 'etch') {
-    const height = Math.max(MIN_HEIGHT, cell.height - 1);
-    nextCell = { ...cell, height, material: height <= BASE_HEIGHT ? 'silicon' : cell.material };
-  } else if (action === 'deposit') {
-    nextCell = { ...cell, height: Math.min(MAX_HEIGHT, cell.height + 1), material: 'deposit' };
-  } else {
-    nextCell = { ...cell, height: target, material: target <= BASE_HEIGHT ? 'silicon' : cell.material };
-  }
-
+export function fabricateCell(state, action, col, row, newStroke) {
+  if (!canFabricateCell(state, action, col, row)) return state;
+  const cell = state.terrain[row][col];
+  const alreadyPatterned = state.terrain.some((cells) => cells.some((item) => item.masked));
   const terrain = state.terrain.map((cells, index) => index === row ? cells.slice() : cells);
-  terrain[row][col] = nextCell;
-  const cost = FAB_TOOLS[action];
-  const terrainHistory = newStroke
-    ? [...state.terrainHistory.slice(-39), { terrain: state.terrain, cost: state.cost }]
-    : state.terrainHistory;
-  const strokeCost = cost.cell + (newStroke ? cost.base : 0);
-  const detail = action === 'lithography'
-    ? 'Pattern painted.'
-    : `Height ${cell.height} → ${nextCell.height}.`;
+  terrain[row][col] = { ...cell, masked: true };
 
+  const tool = FAB_TOOLS.lithography;
+  const startsPattern = newStroke && !alreadyPatterned;
+  const strokeCost = tool.cell + (startsPattern ? tool.base : 0);
   return {
     ...state,
     terrain,
-    terrainHistory,
+    terrainHistory: newStroke ? pushTerrainHistory(state) : state.terrainHistory,
     cost: {
       ...state.cost,
-      processSteps: state.cost.processSteps + Number(newStroke),
+      processSteps: state.cost.processSteps + Number(startsPattern),
       manufacturing: state.cost.manufacturing + strokeCost,
     },
-    message: `${cost.label}: ${detail} +${strokeCost} credits.`,
+    message: `Lithography pattern: tile added. ${startsPattern ? `+${tool.base} setup + ` : '+'}${tool.cell} credits.`,
+  };
+}
+
+export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
+  if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return state;
+  if (!['etch', 'deposit', 'cmp'].includes(action)) return state;
+
+  if (action === 'cmp') {
+    const target = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Number(cmpHeight)));
+    let changed = 0;
+    const terrain = state.terrain.map((row) => row.map((cell) => {
+      if (cell.height <= target) return cell;
+      changed += 1;
+      return {
+        ...cell,
+        height: target,
+        material: target <= BASE_HEIGHT ? 'silicon' : cell.material,
+      };
+    }));
+    if (!changed) {
+      return { ...state, message: `CMP found no terrain above height ${target}. No cost charged.` };
+    }
+    const tool = FAB_TOOLS.cmp;
+    const processCost = tool.base + tool.cell * changed;
+    return {
+      ...state,
+      terrain,
+      terrainHistory: pushTerrainHistory(state),
+      cost: {
+        ...state.cost,
+        processSteps: state.cost.processSteps + 1,
+        manufacturing: state.cost.manufacturing + processCost,
+      },
+      message: `CMP flattened ${changed} tile${changed === 1 ? '' : 's'} to height ${target}. +${processCost} credits.`,
+    };
+  }
+
+  const maskedCount = state.terrain.reduce(
+    (count, row) => count + row.filter((cell) => cell.masked).length,
+    0
+  );
+  if (!maskedCount) {
+    return { ...state, message: `${FAB_TOOLS[action].label} needs a lithography pattern first. Paint tiles on the wafer.` };
+  }
+
+  const canChange = action === 'etch'
+    ? (cell) => cell.height > MIN_HEIGHT
+    : (cell) => cell.height < MAX_HEIGHT;
+  const changeCount = state.terrain.reduce(
+    (count, row) => count + row.filter((cell) => cell.masked && canChange(cell)).length,
+    0
+  );
+  if (!changeCount) {
+    return {
+      ...state,
+      message: `${FAB_TOOLS[action].label} cannot change the current patterned tiles at their present heights. The mask is still active.`,
+    };
+  }
+
+  const terrain = state.terrain.map((row) => row.map((cell) => {
+    if (!cell.masked) return cell;
+    if (action === 'etch') {
+      const height = Math.max(MIN_HEIGHT, cell.height - 1);
+      return {
+        ...cell,
+        height,
+        material: height <= BASE_HEIGHT ? 'silicon' : cell.material,
+        masked: false,
+      };
+    }
+    return {
+      ...cell,
+      height: Math.min(MAX_HEIGHT, cell.height + 1),
+      material: 'deposit',
+      masked: false,
+    };
+  }));
+
+  const tool = FAB_TOOLS[action];
+  const processCost = tool.base + tool.cell * maskedCount;
+  return {
+    ...state,
+    terrain,
+    terrainHistory: pushTerrainHistory(state),
+    cost: {
+      ...state.cost,
+      processSteps: state.cost.processSteps + 1,
+      manufacturing: state.cost.manufacturing + processCost,
+    },
+    message: `${tool.label} processed ${maskedCount} patterned tile${maskedCount === 1 ? '' : 's'}; ${changeCount} changed height. Lithography pattern cleared. +${processCost} credits.`,
   };
 }

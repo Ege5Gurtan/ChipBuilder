@@ -29,7 +29,7 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 ## Levels and scoring
 
 - All level buttons are directly selectable during development/playtesting; players do not need to replay earlier levels to reach a later mission.
-- Current level 01 uses a freely editable discrete-height wafer. Lithography can pattern any tile; Etch lowers patterned tiles, Deposit raises them, and CMP lowers them to a selected target height. Height 1 is walkable, height 0 is a trench, and height 2+ is blocked terrain. Ctrl+Z or the Undo button restores the previous fabrication stroke and its cost. The other three levels retain their existing gate and fixed-channel rules. All levels deliver signals via Enter at DEST.
+- Current level 01 uses a freely editable discrete-height wafer. Mouse dragging only paints a lithography mask; multiple strokes build one active pattern. Etch lowers every patterned tile by one height and Deposit raises every patterned tile by one height, then either process clears the entire mask. CMP is a separate global process that lowers all terrain above its selected target height. Height 1 is walkable, height 0 is a trench, and height 2+ is blocked terrain. Ctrl+Z or the Undo button restores the previous fabrication action, including the mask and its cost. The other three levels retain their existing gate and fixed-channel rules. All levels deliver signals via Enter at DEST.
 
 - Start with a small playable loop: move the carrier, collect bits, deposit a signal, validate it against a target, and receive clear success or failure feedback.
 - Add fabrication actions and circuit elements incrementally as the loop becomes playable. Level goals should be explicit and build on earlier mechanics.

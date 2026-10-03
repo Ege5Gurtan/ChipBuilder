@@ -4,7 +4,7 @@ const levels = [
     number: '01',
     title: 'The broken signal',
     goal: 'Fabricate your own route through the wall, collect three bits, order the cargo 1 → 0 → 1 and press Enter at DEST.',
-    lesson: 'Lithography can paint any region. Etch lowers patterned terrain, Deposit raises it, CMP flattens it to a target height, and Ctrl+Z undoes the last stroke.',
+    lesson: 'Paint a lithography mask anywhere on the wafer, then run Etch or Deposit once across the entire pattern. The mask clears after that process. CMP globally flattens high terrain, and Ctrl+Z undoes the last action.',
     target: '101',
     start: { x: -5.2, y: -3.7 },
     destination: { x: 5.2, y: 3.7 },

@@ -34,21 +34,17 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, tool, cmpHeight }, ref) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
   const paintRef = useRef(onPaint);
   const gateSocketClickRef = useRef(onGateSocketClick);
-  const toolRef = useRef(tool);
-  const cmpHeightRef = useRef(cmpHeight);
   const gameRef = useRef(game);
   const visuals = useRef(null);
   useEffect(() => {
     moveRef.current = onMove;
     paintRef.current = onPaint;
     gateSocketClickRef.current = onGateSocketClick;
-    toolRef.current = tool;
-    cmpHeightRef.current = cmpHeight;
     gameRef.current = game;
   });
 
@@ -228,8 +224,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const id = `${col}:${row}`;
       if (touched.has(id)) return;
       touched.add(id);
-      const action = toolRef.current;
-      const valid = canFabricateCell(gameRef.current, action, col, row, cmpHeightRef.current);
+      const valid = canFabricateCell(gameRef.current, 'lithography', col, row);
       paintRef.current(col, row, !strokeStarted);
       if (valid) strokeStarted = true;
     };
