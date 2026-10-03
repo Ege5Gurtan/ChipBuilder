@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -35,7 +35,8 @@ function App() {
   const allowLithography = Boolean(game.terrain && terrainProcesses.includes('lithography'));
   const maskedTiles = game.terrain ? game.terrain.flat().filter((cell) => cell.masked).length : 0;
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
-  const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate));
+  const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
+  const connections = level.circuit ? circuitConnections(level, game) : [];
   const flashedIds = game.gateEvent?.ids || [];
 
   const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
@@ -60,6 +61,10 @@ function App() {
 
   const handleMove = useCallback((movement) => {
     setGame((current) => movePlayer(level, current, movement));
+  }, [level]);
+
+  const tickCircuit = useCallback((delta) => {
+    setGame((current) => advanceCircuit(level, current, delta));
   }, [level]);
 
   const deliver = useCallback(() => {
@@ -107,6 +112,16 @@ function App() {
   const socketAt = (x, y) => sceneRef.current?.gateSocketAtClientPoint(x, y) || null;
 
   const interactWithGateSocket = (gateId, inputId) => {
+    if (inputId === 'source') {
+      if (game.circuit.sources[gateId]) setGame((current) => reclaimCircuitSource(current, gateId));
+      else if (selectedId) deposit(selectedId, { kind: 'source', sourceId: gateId });
+      else setGame((current) => ({ ...current, message: 'Select a cargo bit and click SRC, drag it onto SRC, or press K near SRC.' }));
+      return;
+    }
+    if (level.gates.find((gate) => gate.id === gateId)?.wired) {
+      setGame((current) => ({ ...current, message: 'This gate receives bits through copper. Connect SRC to IN, then load the bit at SRC.' }));
+      return;
+    }
     const loaded = game.gateState[gateId]?.inputs?.[inputId];
     if (loaded !== undefined) {
       setGame((current) => reclaimGateInput(level, current, gateId, inputId));
@@ -153,7 +168,7 @@ function App() {
     updateDrag(null);
     if (current.socket) {
       const [gateId, inputId] = current.socket.split(':');
-      deposit(current.id, { kind: 'gate', gateId, inputId });
+      deposit(current.id, inputId === 'source' ? { kind: 'source', sourceId: gateId } : { kind: 'gate', gateId, inputId });
       return;
     }
     const index = mergeOrder(current.order, game.cargo).indexOf(current.id);
@@ -252,7 +267,7 @@ function App() {
         {game.terrain && <div><span>Manufacturing cost</span><strong>{game.cost.manufacturing} credits</strong></div>}
       </section>
 
-      <div className="game-layout">
+      <div className={`game-layout ${level.circuit ? 'circuit-layout' : ''}`}>
         <aside className="mission-panel">
           <p className="level-number">LEVEL {level.number}</p>
           <h2>{level.title}</h2>
@@ -269,12 +284,12 @@ function App() {
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
-              <small>Load nearby gate input / drop bit</small>
+              <small>{level.circuit ? 'Load nearby SRC / drop bit' : 'Load nearby gate input / drop bit'}</small>
             </div>
-            <div className="key-line">
+            {!level.circuit && <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
               <small>Deliver cargo at DEST</small>
-            </div>
+            </div>}
             {game.terrain && (
               <div className="key-line">
                 <div className="key-row" aria-hidden="true"><kbd className="wide-key">Ctrl+Z</kbd></div>
@@ -288,7 +303,7 @@ function App() {
             <button onClick={() => handleMove({ x: 0, y: -0.35 })} aria-label="Move down">↓</button>
             <button onClick={() => handleMove({ x: 0.35, y: 0 })} aria-label="Move right">→</button>
             <button onClick={drop} aria-label="Drop selected cargo bit">K</button>
-            <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>
+            {!level.circuit && <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>}
           </div>
         </aside>
 
@@ -298,9 +313,11 @@ function App() {
             level={level}
             game={game}
             onMove={handleMove}
+            onTick={tickCircuit}
             onPaint={paintTerrain}
             onGateSocketClick={interactWithGateSocket}
             hoveredSocket={drag?.socket || null}
+            interactingCargo={Boolean(selectedId)}
             allowLithography={allowLithography}
           />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
@@ -341,6 +358,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
+              {level.circuit && ' Send a bit by selecting it and clicking SRC, dragging it onto SRC, or pressing K near SRC.'}
               {socketGates.length > 0 && ' Drive next to A/B and press K, drag a bit onto a port, or select it and click the port.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
@@ -368,6 +386,24 @@ function App() {
               </div>
             )}
           </section>
+
+          {level.circuit && (
+            <section className="tool-section circuit-section">
+              <div className="section-heading"><span>02</span><h3>Copper circuit</h3></div>
+              <p className="microcopy">Paint → Etch → Fill Copper. Pads connect automatically; output ports drive the signal. Adjacent copper tiles join; diagonal tiles do not.</p>
+              {connections.map((port) => (
+                <div className={`circuit-connection ${port.ready ? 'connected' : ''}`} key={port.id}>
+                  <strong>{port.label}</strong><p className="microcopy">{port.reason}</p>
+                  {port.kind === 'source' && (
+                    <button disabled={!selectedId || !port.ready || Boolean(game.circuit.sources[port.id]) || game.status !== 'playing'} onClick={() => deposit(selectedId, { kind: 'source', sourceId: port.id })}>
+                      Send selected bit from {port.label}
+                    </button>
+                  )}
+                </div>
+              ))}
+              <p className="microcopy">{game.circuit.packets.length} signal{game.circuit.packets.length === 1 ? '' : 's'} in transit. Edits pause until they arrive.</p>
+            </section>
+          )}
 
           {level.gates.map((gate) => {
             const currentGate = game.gateState[gate.id];
@@ -415,13 +451,13 @@ function App() {
                     OUT: {pendingOutput ? `bit ${pendingOutput.value} ready` : 'empty'}
                   </span>
                 </div>
-                <p className="microcopy">
+                {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input and sends its result through the wire at OUT. Walking through this gate leaves cargo unchanged.</p> : <><p className="microcopy">
                   Use the physical A/B ports on the wafer. The easiest method is to drive next to an empty port and press K.
                   Drag/drop and select + click also work. Click a loaded input to take it back before the second input is loaded.
                 </p>
                 <p className="gate-reason">
                   When both inputs are loaded, they are consumed and one new output bit appears at OUT. Walk over OUT to collect it.
-                </p>
+                </p></>}
               </section>
             );
           })}
@@ -444,17 +480,26 @@ function App() {
                 <p className="microcopy process-label"><b>{allowLithography ? '2 · ' : ''}Process the mask</b></p>
               )}
               {terrainProcesses.includes('etch') && (
-                <button onClick={() => runTerrainProcess('etch')} disabled={!maskedTiles}>
+                <button onClick={() => runTerrainProcess('etch')} disabled={!maskedTiles || Boolean(game.circuit.packets.length)}>
                   <span>Etch patterned tiles</span><small>{FAB_TOOLS.etch.base} + {FAB_TOOLS.etch.cell}/tile</small>
                 </button>
               )}
               {terrainProcesses.includes('deposit') && (
-                <button onClick={() => runTerrainProcess('deposit')} disabled={!maskedTiles}>
+                <button onClick={() => runTerrainProcess('deposit')} disabled={!maskedTiles || Boolean(game.circuit.packets.length)}>
                   <span>Deposit on patterned tiles</span><small>{FAB_TOOLS.deposit.base} + {FAB_TOOLS.deposit.cell}/tile</small>
                 </button>
               )}
               {(terrainProcesses.includes('etch') || terrainProcesses.includes('deposit')) && (
                 <p className="microcopy">Etch or Deposit applies to the whole yellow mask at once, then clears that mask.</p>
+              )}
+
+              {terrainProcesses.includes('copper') && (
+                <>
+                  <button onClick={() => runTerrainProcess('copper')} disabled={!game.terrain.flat().some((cell) => cell.height === 0) || Boolean(game.circuit.packets.length)}>
+                    <span>Fill Copper in trenches</span><small>{FAB_TOOLS.copper.base} + {FAB_TOOLS.copper.cell}/tile</small>
+                  </button>
+                  <p className="microcopy">Fills all etched trenches at height 0. In this introductory process, copper finishes flush at height 1; separate contact etching and CMP come later.</p>
+                </>
               )}
 
               {terrainProcesses.includes('cmp') && (
@@ -476,7 +521,7 @@ function App() {
               <button
                 className="undo-fab"
                 onClick={() => setGame((current) => undoTerrainEdit(current))}
-                disabled={!game.terrainHistory.length}
+                disabled={!game.terrainHistory.length || Boolean(game.circuit.packets.length)}
               >
                 <span>Undo last action</span><small>Ctrl+Z</small>
               </button>
@@ -519,10 +564,10 @@ function App() {
               ))}
             </div>
             <p className={`microcopy ${game.atDestination ? 'at-dest' : ''}`}>
-              {game.atDestination
+              {level.circuit ? 'A wired signal arrives and is checked automatically. Rejected bits return to cargo.' : <>{game.atDestination
                 ? 'Carrier at DEST. Press Enter to submit cargo.'
                 : 'Drive to DEST, then press Enter.'}
-              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
+              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.</>}
             </p>
           </section>
         </aside>

@@ -157,6 +157,21 @@ const levels = [
       allowedProcesses: ['lithography', 'etch'],
     },
   },
+  {
+    id: 'copper-not-route',
+    number: '09',
+    title: 'Wire the NOT Gate',
+    goal: 'Fabricate SRC → NOT IN and NOT OUT → DEST. Send a 0 through the circuit to deliver 1.',
+    lesson: 'Paint two separate routes, including the tiles beneath the contact pads. Etch once, then Fill Copper. Collect the 0, select it and click SRC (or press K nearby). Copper is passive: the source and gate output determine direction. Keep their traces separate.',
+    target: '1',
+    start: { x: -5.2, y: -2.8 },
+    destination: { x: 4.333, y: -0.375 },
+    pickups: [{ id: 'wire-zero', value: 0, x: -4.3, y: -2.5 }],
+    obstacles: [],
+    gates: [{ id: 'wired-not', type: 'NOT', wired: true, x: 0, y: -0.375, inputs: [{ id: 'in', label: 'IN' }] }],
+    circuit: { sources: [{ id: 'source', label: 'SRC', x: -4.333, y: -0.375 }] },
+    fabrication: { terrain: {}, allowedProcesses: ['lithography', 'etch', 'copper'] },
+  },
 ];
 
 export default levels;

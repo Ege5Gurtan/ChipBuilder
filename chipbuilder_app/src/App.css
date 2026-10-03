@@ -179,11 +179,11 @@ kbd {
   100% { box-shadow: none; transform: none; }
 }
 
-.fabrication-section > button {
+.fabrication-section > button, .circuit-section button {
   width: 100%; margin-top: 7px; padding: 10px; border: 1px solid var(--line); border-radius: 3px;
   display: flex; justify-content: space-between; color: var(--paper); background: #283637; cursor: pointer; text-align: left;
 }
-.fabrication-section button:hover { border-color: var(--gold); }
+.fabrication-section button:hover, .circuit-section button:hover { border-color: var(--gold); }
 .fabrication-section button.fab-done { border-color: var(--cyan); background: #1d3b3a; }
 .fabrication-section small { color: var(--muted); }
 
@@ -270,3 +270,17 @@ button:hover:not(:disabled) { filter: brightness(1.1); }
 }
 .mask-status strong { color: var(--gold); font: 800 13px Bahnschrift, sans-serif; }
 .process-label { margin-top: 14px; margin-bottom: 5px; }
+
+.circuit-connection {
+  padding: 10px 12px;
+  margin: 10px 0;
+  border-left: 3px solid #6b7d7c;
+  background: rgba(255, 255, 255, 0.03);
+}
+.circuit-connection.connected { border-color: #e69554; }
+.circuit-connection strong { color: #ffd77d; font-size: 0.85rem; }
+.circuit-connection .microcopy { margin: 6px 0; }
+@media (min-width: 821px) {
+  .circuit-layout { height: max(560px, calc(100vh - 141px)); }
+  .circuit-layout .mission-panel, .circuit-layout .signal-panel { overflow-y: auto; }
+}

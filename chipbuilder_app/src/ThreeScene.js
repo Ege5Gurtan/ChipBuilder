@@ -1,14 +1,15 @@
 import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
-import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
-import { canFabricateCell, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
+import { packetPosition } from './circuit.js';
+import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH, terrainCell } from './terrain.js';
+import { canFabricateCell, circuitConnections, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
 const GATE_PULSE_COLOR = new THREE.Color(0xffd16c);
 const PULSE_COLORS = { accept: new THREE.Color(0x6ee37a), partial: new THREE.Color(0x6ee37a), reject: new THREE.Color(0xf07162) };
 const PULSE_SECONDS = 0.6;
-const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, deposit: 0xc97845 };
+const tileColors = { silicon: 0x318b9d, oxide: 0xb7a1d9, deposit: 0xc97845, copper: 0xe69554 };
 
 function label(text, color = '#ffffff') {
   const canvas = document.createElement('canvas');
@@ -34,9 +35,11 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, allowLithography = true }, ref) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onTick, onPaint, onGateSocketClick, hoveredSocket, interactingCargo = false, allowLithography = true }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
+  const tickRef = useRef(onTick);
+  const interactingCargoRef = useRef(interactingCargo);
   const paintRef = useRef(onPaint);
   const gateSocketClickRef = useRef(onGateSocketClick);
   const allowLithographyRef = useRef(allowLithography);
@@ -44,6 +47,8 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
   const visuals = useRef(null);
   useEffect(() => {
     moveRef.current = onMove;
+    tickRef.current = onTick;
+    interactingCargoRef.current = interactingCargo;
     paintRef.current = onPaint;
     gateSocketClickRef.current = onGateSocketClick;
     allowLithographyRef.current = allowLithography;
@@ -68,11 +73,13 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const socket = object?.userData.socket || null;
       if (!socket) return null;
       const [gateId, inputId] = socket.split(':');
+      if (inputId === 'source') return gameRef.current.circuit.sources[gateId] ? null : socket;
+      if (level.gates.find((gate) => gate.id === gateId)?.wired) return null;
       if (gameRef.current.gateState[gateId]?.inputs?.[inputId] !== undefined) return null;
       if (gameRef.current.gateState[gateId]?.pendingOutput) return null;
       return socket;
     },
-  }), []);
+  }), [level]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -91,7 +98,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const tileMeshes = [];
     const tiles = [];
     const tileGeometry = new THREE.BoxGeometry(TILE_WIDTH * 0.97, 1, TILE_DEPTH * 0.97);
-    const materials = Object.fromEntries(Object.entries(tileColors).map(([name, color]) => [name, new THREE.MeshStandardMaterial({ color, roughness: name === 'deposit' ? 0.4 : 0.68, metalness: name === 'deposit' ? 0.45 : 0.12 })]));
+    const materials = Object.fromEntries(Object.entries(tileColors).map(([name, color]) => [name, new THREE.MeshStandardMaterial({ color, roughness: ['deposit', 'copper'].includes(name) ? 0.4 : 0.68, metalness: name === 'copper' ? 0.85 : name === 'deposit' ? 0.45 : 0.12 })]));
     const maskMaterial = new THREE.MeshBasicMaterial({ color: 0xffd56a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
     for (let row = 0; row < TERRAIN_ROWS; row++) for (let col = 0; col < TERRAIN_COLUMNS; col++) {
       const mesh = new THREE.Mesh(tileGeometry, materials.silicon);
@@ -111,8 +118,14 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const pulse = { color: null, start: 0 };
     const bits = new Map();
     const bitMesh = (bit) => {
-      if (bits.has(bit.id)) return bits.get(bit.id);
+      const previous = bits.get(bit.id);
+      if (previous?.userData.value === bit.value) return previous;
+      if (previous) {
+        scene.remove(previous);
+        previous.traverse((object) => { object.geometry?.dispose(); object.material?.map?.dispose(); object.material?.dispose(); });
+      }
       const mesh = orb(bit.value ? 0xffc87a : 0x72e2d4, 0.22);
+      mesh.userData.value = bit.value;
       const text = label(String(bit.value)); text.position.y = 0.53; mesh.add(text);
       scene.add(mesh); bits.set(bit.id, mesh);
       return mesh;
@@ -196,10 +209,25 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
         outputPorts.set(gate.id, { group, ring, outputZero, outputOne });
       }
     });
+    const sourcePorts = new Map();
+    (level.circuit?.sources || []).forEach((source) => {
+      const group = new THREE.Group(); group.position.set(source.x, 0.72, -source.y);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.075, 8, 32), new THREE.MeshStandardMaterial({ color: 0x6b7d7c, metalness: 0.6 }));
+      ring.rotation.x = Math.PI / 2; group.add(ring);
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.08, 24), new THREE.MeshStandardMaterial({ color: 0x182829 })); group.add(pad);
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.49, 0.08, 20), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); group.add(hit);
+      group.userData.socket = `${source.id}:source`;
+      const text = label(source.label || 'SRC', '#ffd77d'); text.position.y = 0.62; group.add(text);
+      scene.add(group); gateHitTargets.push(group); sourcePorts.set(source.id, { group, ring });
+    });
+    if (level.circuit) {
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.08, 24), new THREE.MeshStandardMaterial({ color: 0xe69554, metalness: 0.6 }));
+      pad.position.set(level.destination.x, 0.7, -level.destination.y); scene.add(pad);
+    }
     const gatePulse = { mesh: null, start: 0 };
     visuals.current = {
       renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, pulse,
-      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse,
+      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts,
       clock: null, feedbackSeq: 0, gateSeq: 0,
     };
 
@@ -231,14 +259,23 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (valid) strokeStarted = true;
     };
     const down = (event) => {
+      strokeStarted = false;
       if (!allowLithographyRef.current || !gameRef.current.terrain || event.button !== 0) return;
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+      let socketObject = raycaster.intersectObjects(gateHitTargets, true)[0]?.object;
+      while (socketObject && !socketObject.userData.socket) socketObject = socketObject.parent;
+      const socket = socketObject?.userData.socket;
+      const sourceId = socket?.endsWith(':source') ? socket.split(':')[0] : null;
+      if (socket && (!level.circuit || interactingCargoRef.current || (sourceId && gameRef.current.circuit.sources[sourceId]))) return;
       painting = true; strokeStarted = false; touched.clear();
       renderer.domElement.setPointerCapture(event.pointerId); paint(event);
     };
     const move = (event) => { if (painting) paint(event); };
     const up = () => { painting = false; touched.clear(); };
     const gateClick = (event) => {
-      if (event.button !== 0 || !gateHitTargets.length) return;
+      if (event.button !== 0 || !gateHitTargets.length || strokeStarted) return;
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
@@ -258,7 +295,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
 
     const resize = () => {
       const width = Math.max(1, mount.clientWidth), height = Math.max(1, mount.clientHeight);
-      const aspect = width / height, span = 6.2;
+      const aspect = width / height, span = Math.max(6.2, 7.6 / aspect);
       camera.left = -span * aspect; camera.right = span * aspect;
       camera.top = span; camera.bottom = -span; camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
@@ -269,6 +306,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const animate = () => {
       animationFrame = requestAnimationFrame(animate);
       const delta = Math.min(clock.getDelta(), 0.05);
+      if (level.circuit) tickRef.current?.(delta);
       let x = Number(keys.has('d')) - Number(keys.has('a'));
       let y = Number(keys.has('w')) - Number(keys.has('s'));
       if (x || y) { const length = Math.hypot(x, y); moveRef.current({ x: x / length * MOVE_SPEED * delta, y: y / length * MOVE_SPEED * delta }); }
@@ -331,6 +369,17 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       mesh.scale.setScalar(bit.armed ? 1 : 0.8);
       present.add(bit.id);
     });
+    game.circuit.packets.forEach((packet) => {
+      const mesh = refs.bitMesh(packet.bit), position = packetPosition(packet);
+      mesh.visible = true; mesh.position.set(position.x, 1.05, -position.y); mesh.scale.setScalar(0.85);
+      present.add(packet.bit.id);
+    });
+    const connections = level.circuit ? circuitConnections(level, game) : [];
+    refs.sourcePorts.forEach(({ ring }, id) => {
+      const connected = connections.find((port) => port.id === id)?.ready;
+      ring.material.color.setHex(hoveredSocket === `${id}:source` ? 0xefbd55 : connected ? 0xe69554 : 0x6b7d7c);
+      ring.material.emissive.setHex(connected ? 0x4b2309 : 0x000000);
+    });
     refs.bits.forEach((mesh, id) => { if (!present.has(id)) mesh.visible = false; });
     refs.gatePorts.forEach((port, socket) => {
       const [gateId, inputId] = socket.split(':');
@@ -342,9 +391,11 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const nearCarrier = position
         ? Math.hypot(game.player.x - position.x, game.player.y - position.y) <= GATE_INPUT_INTERACTION_RADIUS
         : false;
-      const highlighted = (hoveredSocket === socket || nearCarrier) && !loaded;
-      port.ring.material.color.setHex(highlighted ? 0xefbd55 : loaded ? 0x63d9d0 : 0x6b7d7c);
-      port.ring.material.emissive.setHex(highlighted ? 0x6b4700 : loaded ? 0x123b38 : 0x000000);
+      const highlighted = !gate?.wired && (hoveredSocket === socket || nearCarrier) && !loaded;
+      const cell = position && terrainCell(position.x, position.y);
+      const connected = gate?.wired && game.terrain?.[cell.row]?.[cell.col]?.material === 'copper';
+      port.ring.material.color.setHex(highlighted ? 0xefbd55 : loaded ? 0x63d9d0 : connected ? 0xe69554 : 0x6b7d7c);
+      port.ring.material.emissive.setHex(highlighted ? 0x6b4700 : loaded ? 0x123b38 : connected ? 0x4b2309 : 0x000000);
       port.ring.material.emissiveIntensity = highlighted ? 1.35 : 1;
     });
     refs.outputPorts.forEach((port, gateId) => {

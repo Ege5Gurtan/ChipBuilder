@@ -52,5 +52,6 @@ export const FAB_TOOLS = {
   lithography: { base: 18, cell: 2, label: 'Lithography' },
   etch: { base: 24, cell: 4, label: 'Etch' },
   deposit: { base: 28, cell: 8, label: 'Deposit' },
+  copper: { base: 28, cell: 8, label: 'Fill Copper' },
   cmp: { base: 22, cell: 2, label: 'CMP' },
 };
