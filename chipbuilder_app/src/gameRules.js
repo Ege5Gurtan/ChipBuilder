@@ -152,7 +152,7 @@ function applyPassThroughGates(level, state) {
 }
 
 function collectGateOutputs(level, state) {
-  return level.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired).reduce((current, gate) => {
+  return level.gates.filter((gate) => !isPassThroughGate(gate)).reduce((current, gate) => {
     const gateState = current.gateState[gate.id];
     const pending = gateState?.pendingOutput;
     if (!pending) return current;
@@ -194,7 +194,6 @@ export function movePlayer(level, state, movement) {
 
 export function attemptSignalDelivery(level, state) {
   if (state.status !== 'playing') return state;
-  if (level.circuit) return { ...state, message: 'This mission delivers through copper to DEST. Load a bit at SRC and complete the wire.' };
   if (!isAtDestination(level, state)) {
     return { ...state, message: 'Delivery needs the carrier at DEST. Nothing was deposited.' };
   }
@@ -320,7 +319,7 @@ export function depositCargo(level, state, cargoId, target) {
   if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
   if (currentGate.pendingOutput) {
-    return { ...state, message: gate.wired ? `${gate.type} OUT is occupied. Complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another pair.` };
+    return { ...state, message: gate.wired ? `${gate.type} OUT is occupied. Collect the waiting bit or complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another pair.` };
   }
 
   const inputs = { ...currentGate.inputs, [input.id]: { id: cargo.id, value: cargo.value } };
@@ -364,7 +363,7 @@ export function depositCargo(level, state, cargoId, target) {
       ids: [outputId],
     },
     cost: { ...state.cost, energy: state.cost.energy + 2 },
-    message: `${gate.type} consumed ${gate.inputs.map((item) => `${item.label}=${inputs[item.id].value}`).join(', ')} and produced ${output} at OUT. ${gate.wired ? 'The output waits for a valid copper route.' : 'Walk over the output bit to collect it.'}`,
+    message: `${gate.type} consumed ${gate.inputs.map((item) => `${item.label}=${inputs[item.id].value}`).join(', ')} and produced ${output} at OUT. ${gate.wired ? 'Walk over OUT to collect it, or complete a copper route for automatic forwarding.' : 'Walk over the output bit to collect it.'}`,
   };
 }
 
@@ -734,5 +733,5 @@ export function advanceCircuit(level, state, delta) {
       message: `${driver.label} sent ${bit.value} through copper to ${net.receivers.map((port) => port.label).join(', ')}.`,
     };
   });
-  return next;
+  return collectGateOutputs(level, next);
 }

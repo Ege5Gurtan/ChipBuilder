@@ -70,14 +70,14 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
 # Gameplay
 
-Nine selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, and copper interconnects. WASD always controls the carrier while the mouse paints fabrication patterns. K loads a nearby input/source or drops a cargo bit; Enter delivers at DEST in the first eight missions. Cargo can be reordered by dragging.
+Nine selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, and copper interconnects. WASD always controls the carrier while the mouse paints fabrication patterns. K loads a nearby input/source or drops a cargo bit; Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
 
 ## Level 09: Wire the NOT Gate
 
 1. Paint two separate horizontal traces on the row containing the pads: SRC to NOT IN, and NOT OUT to DEST. Include the tile beneath each pad. Do not join the two output drivers together.
 2. Click **Etch patterned tiles**, then **Fill Copper in trenches**. Copper fills all height-0 trenches and automatically contacts any pad it reaches. This introductory process combines fill and flush finishing; manual contacts, vias, and wire CMP are future features.
 3. Collect the 0. Select it and click SRC or the sidebar's send button, drag it onto SRC, or approach SRC and press K.
-4. Watch the signal travel through the copper, invert at NOT, and deliver 1 automatically at DEST. The carrier does not need to move during transport. Walking through a wired gate does not invert cargo.
+4. Watch the signal travel through the copper, invert at NOT, and deliver 1 automatically at DEST. The carrier does not need to move during transport. Alternatively, leave OUT unconnected, walk over the waiting output bit to collect it, carry it to DEST and press Enter. Walking through a wired gate does not invert cargo.
 
 Copper is passive and joins only across shared tile edges. Ports determine direction. The circuit panel explains open connections, multiple-driver shorts, and feedback loops. Gate outputs wait for available receivers; fan-out sends one copy of a finite token to each receiver. A rejected destination value returns to cargo. Edits and undo pause while packets are in transit. Ctrl+Z refunds fabrication costs while preserving gameplay energy.
 

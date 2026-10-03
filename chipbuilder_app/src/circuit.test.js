@@ -1,6 +1,6 @@
 import levels from './levels.js';
 import { wireNets } from './circuit.js';
-import { advanceCircuit, applyTerrainProcess, attemptSignalDelivery, circuitConnections, createGame, depositCargo, dropCargoBit, fabricateCell, movePlayer, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, applyTerrainProcess, attemptSignalDelivery, circuitConnections, createGame, depositCargo, dropCargoBit, fabricateCell, gateOutputPosition, movePlayer, undoTerrainEdit } from './gameRules.js';
 
 const level = levels.find((item) => item.circuit);
 const routeCells = [...Array.from({ length: 6 }, (_, i) => [i + 2, 5]), ...Array.from({ length: 5 }, (_, i) => [i + 11, 5])];
@@ -71,16 +71,42 @@ test('wire edits and undo cannot alter an in-flight packet route or costs', () =
   });
 });
 
-test('unconnected NOT output holds one result without duplicating or letting the carrier pick it up', () => {
+test('unconnected NOT output is collected once and can be carried to DEST', () => {
   const state = run(depositCargo(level, withCargo(fabricateRoute(routeCells.filter(([col]) => col < 8))), 'test-bit', { kind: 'source', sourceId: 'source' }));
   expect(state.gateState['wired-not'].pendingOutput.value).toBe(1);
   expect(state.gateState['wired-not'].activations).toBe(1);
-  const next = movePlayer(level, { ...state, player: { x: 1.355, y: -0.375 } }, { x: 0, y: 0 });
-  expect(next.cargo).toHaveLength(0);
-  expect(next.gateState['wired-not'].pendingOutput.value).toBe(1);
+  const outside = movePlayer(level, { ...state, player: { x: 2.1, y: -0.375 } }, { x: 0, y: 0 });
+  expect(outside.cargo).toHaveLength(0);
+  const next = movePlayer(level, { ...state, player: gateOutputPosition(level.gates[0]) }, { x: 0, y: 0 });
+  expect(next.cargo).toEqual([{ id: state.gateState['wired-not'].pendingOutput.id, value: 1 }]);
+  expect(next.gateState['wired-not'].pendingOutput).toBeNull();
+  const again = run(movePlayer(level, next, { x: 0, y: 0 }));
+  expect(again.cargo).toEqual(next.cargo);
+  expect(again.cost.energy).toBe(state.cost.energy + 1);
+  expect(again.gateState['wired-not'].activations).toBe(1);
+  expect(attemptSignalDelivery(level, again).status).toBe('playing');
+  expect(attemptSignalDelivery(level, { ...again, player: level.destination }).status).toBe('success');
 });
 
-test('wired NOT does not flip walking cargo and direct delivery cannot bypass the circuit', () => {
+test('a carrier already standing at OUT collects the arriving result without moving', () => {
+  let state = depositCargo(level, withCargo(fabricateRoute(routeCells.filter(([col]) => col < 8))), 'test-bit', { kind: 'source', sourceId: 'source' });
+  state = { ...state, player: gateOutputPosition(level.gates[0]) };
+  const result = run(state);
+  expect(result.cargo.map((bit) => bit.value)).toEqual([1]);
+  expect(result.gateState['wired-not'].pendingOutput).toBeNull();
+  expect(result.gateState['wired-not'].activations).toBe(1);
+});
+
+test('a ready copper route forwards before proximity pickup at OUT', () => {
+  let state = depositCargo(level, withCargo(fabricateRoute()), 'test-bit', { kind: 'source', sourceId: 'source' });
+  state = { ...state, player: gateOutputPosition(level.gates[0]) };
+  const result = run(state);
+  expect(result.status).toBe('success');
+  expect(result.cargo).toHaveLength(0);
+  expect(result.gateState['wired-not'].pendingOutput).toBeNull();
+});
+
+test('wired NOT does not flip walking cargo, accepts only wired inputs, and rejects wrong delivery', () => {
   const state = withCargo(createGame(level));
   const next = movePlayer(level, { ...state, player: { x: 0, y: -0.375 } }, { x: 0, y: 0 });
   expect(next.cargo[0].value).toBe(0);

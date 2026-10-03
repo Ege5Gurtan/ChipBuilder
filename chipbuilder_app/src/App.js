@@ -286,10 +286,10 @@ function App() {
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
               <small>{level.circuit ? 'Load nearby SRC / drop bit' : 'Load nearby gate input / drop bit'}</small>
             </div>
-            {!level.circuit && <div className="key-line">
+            <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
               <small>Deliver cargo at DEST</small>
-            </div>}
+            </div>
             {game.terrain && (
               <div className="key-line">
                 <div className="key-row" aria-hidden="true"><kbd className="wide-key">Ctrl+Z</kbd></div>
@@ -303,7 +303,7 @@ function App() {
             <button onClick={() => handleMove({ x: 0, y: -0.35 })} aria-label="Move down">↓</button>
             <button onClick={() => handleMove({ x: 0.35, y: 0 })} aria-label="Move right">→</button>
             <button onClick={drop} aria-label="Drop selected cargo bit">K</button>
-            {!level.circuit && <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>}
+            <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>
           </div>
         </aside>
 
@@ -451,7 +451,7 @@ function App() {
                     OUT: {pendingOutput ? `bit ${pendingOutput.value} ready` : 'empty'}
                   </span>
                 </div>
-                {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input and sends its result through the wire at OUT. Walking through this gate leaves cargo unchanged.</p> : <><p className="microcopy">
+                {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input and sends its result through the wire at OUT. Walking through this gate leaves cargo unchanged. Walk over OUT to collect a waiting output bit, then carry it to DEST and press Enter.</p> : <><p className="microcopy">
                   Use the physical A/B ports on the wafer. The easiest method is to drive next to an empty port and press K.
                   Drag/drop and select + click also work. Click a loaded input to take it back before the second input is loaded.
                 </p>
@@ -564,10 +564,10 @@ function App() {
               ))}
             </div>
             <p className={`microcopy ${game.atDestination ? 'at-dest' : ''}`}>
-              {level.circuit ? 'A wired signal arrives and is checked automatically. Rejected bits return to cargo.' : <>{game.atDestination
+              {level.circuit && 'Wired signals are checked automatically; rejected bits return to cargo. '}{game.atDestination
                 ? 'Carrier at DEST. Press Enter to submit cargo.'
                 : 'Drive to DEST, then press Enter.'}
-              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.</>}
+              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
             </p>
           </section>
         </aside>
