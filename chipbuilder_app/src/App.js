@@ -115,7 +115,7 @@ function App() {
     if (inputId === 'source') {
       if (game.circuit.sources[gateId]) setGame((current) => reclaimCircuitSource(current, gateId));
       else if (selectedId) deposit(selectedId, { kind: 'source', sourceId: gateId });
-      else setGame((current) => ({ ...current, message: 'Select a cargo bit and click SRC, drag it onto SRC, or press K near SRC.' }));
+      else setGame((current) => ({ ...current, message: 'Select a cargo bit and click a wire pin, drag it onto the pin, or press K nearby. Walk over a receiving pin to collect its bit.' }));
       return;
     }
     if (level.gates.find((gate) => gate.id === gateId)?.wired) {
@@ -284,7 +284,7 @@ function App() {
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
-              <small>{level.circuit ? 'Load nearby SRC / drop bit' : 'Load nearby gate input / drop bit'}</small>
+              <small>{level.circuit ? 'Load nearby wire pin / drop bit' : 'Load nearby gate input / drop bit'}</small>
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
@@ -358,7 +358,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {level.circuit && ' Send a bit by selecting it and clicking SRC, dragging it onto SRC, or pressing K near SRC.'}
+              {level.circuit && ' Send a bit by selecting it and clicking a supplied SRC or a tungsten pin, dragging it onto the pin, or pressing K nearby.'}
               {socketGates.length > 0 && ' Drive next to A/B and press K, drag a bit onto a port, or select it and click the port.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
@@ -390,12 +390,13 @@ function App() {
           {level.circuit && (
             <section className="tool-section circuit-section">
               <div className="section-heading"><span>02</span><h3>Copper circuit</h3></div>
-              <p className="microcopy">Paint → Etch → Fill Copper. Pads connect automatically; output ports drive the signal. Adjacent copper tiles join; diagonal tiles do not.</p>
+              <p className="microcopy">{terrainProcesses.includes('tungsten') ? 'Copper joins supplied pads automatically. To create a missing pin, pattern one copper tile and Deposit Tungsten. Silver pins send selected cargo or hold arriving bits for pickup.' : 'Paint → Etch → Fill Copper. The supplied SRC, IN, OUT and DEST pads work automatically when copper reaches them; no tungsten is required.'} Copper joins by shared edges.</p>
+              {connections.length === 0 && <p className="microcopy">No wire pins yet. Pattern copper beneath a ? marker, then Deposit Tungsten.</p>}
               {connections.map((port) => (
                 <div className={`circuit-connection ${port.ready ? 'connected' : ''}`} key={port.id}>
                   <strong>{port.label}</strong><p className="microcopy">{port.reason}</p>
-                  {port.kind === 'source' && (
-                    <button disabled={!selectedId || !port.ready || Boolean(game.circuit.sources[port.id]) || game.status !== 'playing'} onClick={() => deposit(selectedId, { kind: 'source', sourceId: port.id })}>
+                  {['source', 'pin'].includes(port.kind) && (
+                    <button disabled={!selectedId || !port.canSend || game.status !== 'playing'} onClick={() => deposit(selectedId, { kind: 'source', sourceId: port.id })}>
                       Send selected bit from {port.label}
                     </button>
                   )}
@@ -499,6 +500,15 @@ function App() {
                     <span>Fill Copper in trenches</span><small>{FAB_TOOLS.copper.base} + {FAB_TOOLS.copper.cell}/tile</small>
                   </button>
                   <p className="microcopy">Fills all etched trenches at height 0. In this introductory process, copper finishes flush at height 1; separate contact etching and CMP come later.</p>
+                </>
+              )}
+
+              {terrainProcesses.includes('tungsten') && (
+                <>
+                  <button onClick={() => runTerrainProcess('tungsten')} disabled={!maskedTiles || Boolean(game.circuit.packets.length)}>
+                    <span>Deposit Tungsten pins</span><small>{FAB_TOOLS.tungsten.base} + {FAB_TOOLS.tungsten.cell}/new pin</small>
+                  </button>
+                  <p className="microcopy">Pattern copper tiles at height 1. Each patterned tile becomes a silver contact pin; the wire stays walkable. Supplied pads already work and need no tungsten.</p>
                 </>
               )}
 

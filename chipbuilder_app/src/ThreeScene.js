@@ -2,7 +2,7 @@ import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { packetPosition } from './circuit.js';
 import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH, terrainCell } from './terrain.js';
-import { canFabricateCell, circuitConnections, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
+import { canFabricateCell, circuitConnections, circuitPorts, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
@@ -73,7 +73,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const socket = object?.userData.socket || null;
       if (!socket) return null;
       const [gateId, inputId] = socket.split(':');
-      if (inputId === 'source') return gameRef.current.circuit.sources[gateId] ? null : socket;
+      if (inputId === 'source') return gameRef.current.circuit.sources[gateId] || gameRef.current.circuit.pinOutputs[gateId] ? null : socket;
       if (level.gates.find((gate) => gate.id === gateId)?.wired) return null;
       if (gameRef.current.gateState[gateId]?.inputs?.[inputId] !== undefined) return null;
       if (gameRef.current.gateState[gateId]?.pendingOutput) return null;
@@ -210,15 +210,23 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       }
     });
     const sourcePorts = new Map();
-    (level.circuit?.sources || []).forEach((source) => {
+    const addSourcePort = (source) => {
       const group = new THREE.Group(); group.position.set(source.x, 0.72, -source.y);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.075, 8, 32), new THREE.MeshStandardMaterial({ color: 0x6b7d7c, metalness: 0.6 }));
       ring.rotation.x = Math.PI / 2; group.add(ring);
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.08, 24), new THREE.MeshStandardMaterial({ color: 0x182829 })); group.add(pad);
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.08, 24), new THREE.MeshStandardMaterial({ color: source.kind === 'pin' ? 0xd1dbe5 : 0x182829, metalness: 0.8, roughness: 0.3 })); group.add(pad);
       const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.49, 0.49, 0.08, 20), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); group.add(hit);
       group.userData.socket = `${source.id}:source`;
-      const text = label(source.label || 'SRC', '#ffd77d'); text.position.y = 0.62; group.add(text);
-      scene.add(group); gateHitTargets.push(group); sourcePorts.set(source.id, { group, ring });
+      const text = label(source.label || 'SRC', source.kind === 'pin' ? '#d1e6f7' : '#ffd77d'); text.position.y = 0.62; group.add(text);
+      scene.add(group); gateHitTargets.push(group); sourcePorts.set(source.id, { group, ring, dynamic: source.kind === 'pin' });
+    };
+    (level.circuit?.sources || []).forEach(addSourcePort);
+    const pinHints = (level.circuit?.pinHints || []).map((hint) => {
+      const group = new THREE.Group(); group.position.set(hint.x, 0.72, -hint.y);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.025, 6, 24), new THREE.MeshBasicMaterial({ color: 0x94b2ce, transparent: true, opacity: 0.55 }));
+      ring.rotation.x = Math.PI / 2; group.add(ring);
+      const text = label(`${hint.label}?`, '#94b2ce'); text.position.y = 0.62; group.add(text);
+      scene.add(group); return { group, ...hint };
     });
     if (level.circuit) {
       const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.08, 24), new THREE.MeshStandardMaterial({ color: 0xe69554, metalness: 0.6 }));
@@ -227,7 +235,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const gatePulse = { mesh: null, start: 0 };
     visuals.current = {
       renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, pulse,
-      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts,
+      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts, addSourcePort, pinHints,
       clock: null, feedbackSeq: 0, gateSeq: 0,
     };
 
@@ -375,9 +383,29 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       present.add(packet.bit.id);
     });
     const connections = level.circuit ? circuitConnections(level, game) : [];
-    refs.sourcePorts.forEach(({ ring }, id) => {
+    const pins = circuitPorts(level, game).filter((port) => port.kind === 'pin');
+    refs.sourcePorts.forEach((port, id) => {
+      if (!port.dynamic || pins.some((pin) => pin.id === id)) return;
+      const index = refs.gateHitTargets.indexOf(port.group);
+      if (index >= 0) refs.gateHitTargets.splice(index, 1);
+      port.group.removeFromParent();
+      port.group.traverse((object) => { object.geometry?.dispose(); object.material?.map?.dispose(); object.material?.dispose(); });
+      refs.sourcePorts.delete(id);
+    });
+    pins.forEach((pin) => { if (!refs.sourcePorts.has(pin.id)) refs.addSourcePort(pin); });
+    refs.pinHints.forEach((hint) => {
+      const cell = terrainCell(hint.x, hint.y);
+      hint.group.visible = !pins.some((pin) => pin.col === cell.col && pin.row === cell.row);
+    });
+    refs.sourcePorts.forEach(({ group }, id) => {
+      const bit = game.circuit.sources[id] || game.circuit.pinOutputs[id];
+      if (!bit) return;
+      const mesh = refs.bitMesh(bit); mesh.visible = true;
+      mesh.position.set(group.position.x, 1.15, group.position.z); mesh.scale.setScalar(0.85); present.add(bit.id);
+    });
+    refs.sourcePorts.forEach(({ ring, dynamic }, id) => {
       const connected = connections.find((port) => port.id === id)?.ready;
-      ring.material.color.setHex(hoveredSocket === `${id}:source` ? 0xefbd55 : connected ? 0xe69554 : 0x6b7d7c);
+      ring.material.color.setHex(hoveredSocket === `${id}:source` ? 0xefbd55 : connected ? (dynamic ? 0xd1e6f7 : 0xe69554) : 0x6b7d7c);
       ring.material.emissive.setHex(connected ? 0x4b2309 : 0x000000);
     });
     refs.bits.forEach((mesh, id) => { if (!present.has(id)) mesh.visible = false; });

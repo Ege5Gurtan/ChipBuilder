@@ -1,5 +1,5 @@
-import { SIGNAL_SPEED, wireNets, wireRoute } from './circuit.js';
-import { BASE_HEIGHT, createTerrain, FAB_TOOLS, MAX_HEIGHT, MIN_HEIGHT, terrainHeight } from './terrain.js';
+import { SIGNAL_SPEED, cellKey, wireNets, wirePins, wireRoute } from './circuit.js';
+import { BASE_HEIGHT, createTerrain, FAB_TOOLS, MAX_HEIGHT, MIN_HEIGHT, terrainCell, terrainHeight } from './terrain.js';
 
 export const PLAYER_RADIUS = 0.34;
 export const PICKUP_RADIUS = 0.62;
@@ -62,7 +62,11 @@ export function createGame(level) {
       ? createTerrain(level.fabrication.terrain === true ? {} : level.fabrication.terrain)
       : null,
     terrainHistory: [],
-    circuit: { sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [] },
+    circuit: {
+      sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [],
+      pinOutputs: {}, pinTransfers: 0,
+      prebuiltPinCells: circuitPorts(level).map((port) => cellKey(terrainCell(port.x, port.y))),
+    },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
     status: 'playing',
     message: 'Carrier online. Follow the goal and deliver the exact target signal.',
@@ -180,7 +184,7 @@ export function movePlayer(level, state, movement) {
 
   const candidate = clampToWafer({ x: state.player.x + movement.x, y: state.player.y + movement.y });
   const player = isWalkable(level, state, candidate) ? candidate : state.player;
-  const next = applyPassThroughGates(level, collectGateOutputs(level, collectBits({ ...state, player })));
+  const next = applyPassThroughGates(level, collectPinOutputs(level, collectGateOutputs(level, collectBits({ ...state, player }))));
   const atDestination = isAtDestination(level, next);
   if (atDestination === state.atDestination) return next;
   return {
@@ -196,6 +200,9 @@ export function attemptSignalDelivery(level, state) {
   if (state.status !== 'playing') return state;
   if (!isAtDestination(level, state)) {
     return { ...state, message: 'Delivery needs the carrier at DEST. Nothing was deposited.' };
+  }
+  if (level.circuit?.requirePinTransfer && !state.circuit.pinTransfers) {
+    return { ...state, message: 'Send the bit through copper to a tungsten output pin before delivering it.' };
   }
   if (!state.cargo.length) {
     return { ...state, message: 'Cargo is empty. Collect bits before delivering.' };
@@ -265,9 +272,10 @@ function nearestOpenGateInput(level, state) {
 export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
-  const source = level.circuit?.sources.find((port) =>
-    Math.hypot(state.player.x - port.x, state.player.y - port.y) <= GATE_INPUT_INTERACTION_RADIUS
-  );
+  const source = circuitPorts(level, state).filter((port) => ['source', 'pin'].includes(port.kind))
+    .map((port) => ({ ...port, distance: Math.hypot(state.player.x - port.x, state.player.y - port.y) }))
+    .filter((port) => port.distance <= GATE_INPUT_INTERACTION_RADIUS)
+    .sort((a, b) => a.distance - b.distance)[0];
   if (source) return loadCircuitSource(level, state, item.id, source.id);
   const gateTarget = nearestOpenGateInput(level, state);
   if (gateTarget) {
@@ -444,17 +452,34 @@ function pushTerrainHistory(state) {
   return [...state.terrainHistory.slice(-39), terrainSnapshot(state)];
 }
 
+// Fabrication must never destroy a queued or received finite token.
+function reconcilePinTokens(state) {
+  const pins = new Set(wirePins(state.terrain).map((pin) => pin.id));
+  const sources = { ...state.circuit.sources }, pinOutputs = { ...state.circuit.pinOutputs };
+  const returned = [];
+  Object.keys(sources).filter((id) => id.startsWith('pin-') && !pins.has(id)).forEach((id) => {
+    if (sources[id]) returned.push(sources[id]);
+    delete sources[id];
+  });
+  Object.keys(pinOutputs).filter((id) => !pins.has(id)).forEach((id) => {
+    if (pinOutputs[id]) returned.push(pinOutputs[id]);
+    delete pinOutputs[id];
+  });
+  return { ...state, cargo: [...state.cargo, ...returned], circuit: { ...state.circuit, sources, pinOutputs },
+    message: returned.length ? `${state.message} Removed pin's bit returned to cargo.` : state.message };
+}
+
 export function undoTerrainEdit(state) {
   if (state.status !== 'playing' || !state.terrainHistory?.length) return state;
   if (state.circuit.packets.length) return { ...state, message: 'Wait for the signal to arrive before undoing fabrication.' };
   const previous = state.terrainHistory[state.terrainHistory.length - 1];
-  return {
+  return reconcilePinTokens({
     ...state,
     terrain: previous.terrain,
     cost: { ...state.cost, ...previous.cost },
     terrainHistory: state.terrainHistory.slice(0, -1),
     message: 'Undid the last fabrication action.',
-  };
+  });
 }
 
 export function fabricateCell(state, action, col, row, newStroke) {
@@ -482,9 +507,15 @@ export function fabricateCell(state, action, col, row, newStroke) {
 }
 
 export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
+  const next = processTerrain(state, action, cmpHeight);
+  return next.terrain !== state.terrain ? reconcilePinTokens(next) : next;
+}
+
+function processTerrain(state, action, cmpHeight) {
   if (state.status !== 'playing' || !state.terrain || !FAB_TOOLS[action]) return state;
   if (state.circuit.packets.length) return { ...state, message: 'Wait for the signal to arrive before editing its route.' };
   if (action === 'copper') return fillCopper(state);
+  if (action === 'tungsten') return depositTungsten(state);
   if (!['etch', 'deposit', 'cmp'].includes(action)) return state;
 
   if (action === 'cmp') {
@@ -496,6 +527,7 @@ export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
       return {
         ...cell,
         height: target,
+        contact: null,
         material: target <= BASE_HEIGHT ? 'silicon' : cell.material,
       };
     }));
@@ -546,6 +578,7 @@ export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
       return {
         ...cell,
         height,
+        contact: null,
         material: height <= BASE_HEIGHT ? 'silicon' : cell.material,
         masked: false,
       };
@@ -554,6 +587,7 @@ export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
       ...cell,
       height: Math.min(MAX_HEIGHT, cell.height + 1),
       material: 'deposit',
+      contact: null,
       masked: false,
     };
   }));
@@ -573,10 +607,10 @@ export function applyTerrainProcess(state, action, cmpHeight = BASE_HEIGHT) {
   };
 }
 
-export function circuitPorts(level) {
+export function circuitPorts(level, state) {
   if (!level.circuit) return [];
   return [
-    ...level.circuit.sources.map((source) => ({ ...source, role: 'driver', kind: 'source', label: source.label || 'SRC' })),
+    ...(level.circuit.sources || []).map((source) => ({ ...source, role: 'driver', kind: 'source', label: source.label || 'SRC' })),
     ...level.gates.filter((gate) => gate.wired).flatMap((gate) => [
       ...gate.inputs.map((input) => ({
         id: `${gate.id}:${input.id}`, role: 'receiver', kind: 'gate', gateId: gate.id, inputId: input.id,
@@ -585,11 +619,16 @@ export function circuitPorts(level) {
       { id: `${gate.id}:out`, role: 'driver', kind: 'gateOutput', gateId: gate.id, label: `${gate.type} OUT`, ...gateOutputPosition(gate) },
     ]),
     { id: 'destination', role: 'receiver', kind: 'destination', label: 'DEST', ...level.destination },
+    ...wirePins(state?.terrain).map((pin) => {
+      const hint = level.circuit.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
+      const driving = state.circuit.sources[pin.id] || state.circuit.packets.some((packet) => packet.driverId === pin.id);
+      return { ...pin, kind: 'pin', role: driving ? 'driver' : 'receiver', label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
+    }),
   ];
 }
 
 function circuitNets(level, state) {
-  const nets = wireNets(state.terrain, circuitPorts(level));
+  const nets = wireNets(state.terrain, circuitPorts(level, state));
   const edges = new Map();
   nets.forEach((net) => {
     const driver = net.drivers.length === 1 && net.drivers[0];
@@ -609,35 +648,42 @@ function circuitNets(level, state) {
 }
 
 export function circuitConnections(level, state) {
-  const ports = circuitPorts(level);
+  const ports = circuitPorts(level, state);
   const nets = circuitNets(level, state);
-  return ports.filter((port) => port.role === 'driver').map((port) => {
+  return ports.filter((port) => port.role === 'driver' || port.kind === 'pin').map((port) => {
     const net = nets.find((item) => item.ports.some((entry) => entry.id === port.id));
-    const receivers = net?.receivers || [];
+    const receiving = port.kind === 'pin' && port.role === 'receiver' && net?.drivers.length > 0;
+    const receivers = (net?.receivers || []).filter((receiver) => receiver.id !== port.id);
+    const ready = Boolean(net && !net.conflict && !net.cycle && (receiving || receivers.length));
+    const busy = Boolean(state.circuit.sources[port.id] || state.circuit.pinOutputs[port.id]
+      || state.circuit.packets.some((packet) => packet.driverId === port.id || packet.receiver.id === port.id));
     return {
-      ...port,
-      ready: Boolean(net && !net.conflict && !net.cycle && receivers.length),
-      reason: !net ? 'Open: copper has not reached this pad.'
+      ...port, ready, canSend: ready && !receiving && !busy,
+      reason: port.kind === 'pin' && state.circuit.pinOutputs[port.id]
+        ? `Holding bit ${state.circuit.pinOutputs[port.id].value}. Walk over this tungsten pin to collect it.`
+        : !net ? 'Open: copper has not reached this pad.'
         : net.conflict ? 'Short: multiple output drivers share this copper. Undo and separate the traces.'
           : net.cycle ? 'Feedback loop: route the output forward to another component or DEST.'
-          : !receivers.length ? 'Open: this trace does not reach an input pad.'
-            : `Connected to ${receivers.map((receiver) => receiver.label).join(', ')}.`,
+            : receiving ? `Receives from ${net.drivers[0].label}. Walk over this pin to collect a waiting bit.`
+              : !receivers.length ? 'Open: this trace does not reach an input pad.'
+                : `Connected to ${receivers.map((receiver) => receiver.label).join(', ')}.`,
     };
   });
 }
 
 export function loadCircuitSource(level, state, cargoId, sourceId) {
-  if (state.status !== 'playing' || !level.circuit?.sources.some((source) => source.id === sourceId)) return state;
+  if (state.status !== 'playing') return state;
+  const port = circuitPorts(level, state).find((entry) => entry.id === sourceId && ['source', 'pin'].includes(entry.kind));
+  if (!port) return { ...state, message: 'This wire has no pin yet. Pattern a copper tile and Deposit Tungsten. Bit stays in cargo.' };
   const bit = state.cargo.find((item) => item.id === cargoId);
   if (!bit) return state;
-  if (state.circuit.sources[sourceId]) return { ...state, message: 'SRC already holds a bit. Click it to reclaim the bit, or finish the wire.' };
-  const connection = circuitConnections(level, state).find((port) => port.id === sourceId);
-  if (!connection.ready) return { ...state, message: `${connection.reason} Bit stays in cargo.` };
+  const connection = circuitConnections(level, state).find((entry) => entry.id === sourceId);
+  if (!connection.canSend) return { ...state, message: `${connection.reason} This pin cannot send now. Bit stays in cargo.` };
   return {
     ...state,
     cargo: state.cargo.filter((item) => item.id !== cargoId),
     circuit: { ...state.circuit, sources: { ...state.circuit.sources, [sourceId]: bit } },
-    message: `SRC loaded with ${bit.value}. The source drives the passive copper toward connected inputs.`,
+    message: `${port.label} loaded with ${bit.value}. The pin drives copper toward connected inputs.`,
   };
 }
 
@@ -651,6 +697,37 @@ export function reclaimCircuitSource(state, sourceId) {
   };
 }
 
+function depositTungsten(state) {
+  const masked = state.terrain.flatMap((cells, row) => cells.flatMap((cell, col) => cell.masked ? [{ cell, col, row }] : []));
+  if (!masked.length) return { ...state, message: 'Pattern a copper tile first, then Deposit Tungsten to create a wire pin. No cost charged.' };
+  const supplied = new Set(state.circuit.prebuiltPinCells);
+  const candidates = masked.filter((tile) => !supplied.has(cellKey(tile)) && tile.cell.contact !== 'tungsten');
+  if (candidates.some(({ cell }) => cell.material !== 'copper' || cell.height !== BASE_HEIGHT)) {
+    return { ...state, message: 'Tungsten pins need copper at height 1 beneath every new patterned pin. Fill Copper first. Mask kept; no cost charged.' };
+  }
+  if (!candidates.length) return { ...state, message: 'These pins already exist. Supplied pads need no tungsten; no cost charged.' };
+  const tool = FAB_TOOLS.tungsten, credits = tool.base + candidates.length * tool.cell;
+  const keys = new Set(candidates.map(cellKey));
+  return {
+    ...state,
+    terrain: state.terrain.map((cells, row) => cells.map((cell, col) => ({ ...cell, masked: false,
+      ...(keys.has(cellKey({ col, row })) ? { contact: 'tungsten' } : {}) }))),
+    terrainHistory: pushTerrainHistory(state),
+    cost: { ...state.cost, processSteps: state.cost.processSteps + 1, manufacturing: state.cost.manufacturing + credits },
+    message: `Created ${candidates.length} tungsten wire pin${candidates.length === 1 ? '' : 's'}. Select a cargo bit and click a pin to send; walk over a receiving pin to collect. +${credits} credits.`,
+  };
+}
+
+function collectPinOutputs(level, state) {
+  return wirePins(state.terrain).reduce((current, pin) => {
+    const bit = current.circuit.pinOutputs[pin.id];
+    if (!bit || Math.hypot(current.player.x - pin.x, current.player.y - pin.y) > PICKUP_RADIUS) return current;
+    const pinOutputs = { ...current.circuit.pinOutputs }; delete pinOutputs[pin.id];
+    return { ...current, cargo: [...current.cargo, bit], circuit: { ...current.circuit, pinOutputs },
+      cost: { ...current.cost, energy: current.cost.energy + 1 }, message: `Collected tungsten pin output ${bit.value}. Carry it to DEST or send it into another wire.` };
+  }, state);
+}
+
 function fillCopper(state) {
   const count = state.terrain.flat().filter((cell) => cell.height === MIN_HEIGHT).length;
   if (!count) return { ...state, message: 'Copper needs etched trenches at height 0. Paint a connected route and Etch it first. No cost charged.' };
@@ -658,7 +735,7 @@ function fillCopper(state) {
   return {
     ...state,
     terrain: state.terrain.map((row) => row.map((cell) => cell.height === MIN_HEIGHT
-      ? { ...cell, height: BASE_HEIGHT, material: 'copper', masked: false } : cell)),
+      ? { ...cell, height: BASE_HEIGHT, material: 'copper', contact: null, masked: false } : cell)),
     terrainHistory: pushTerrainHistory(state),
     cost: { ...state.cost, processSteps: state.cost.processSteps + 1, manufacturing: state.cost.manufacturing + credits },
     message: `Filled ${count} trench tiles with copper. Contacts connect automatically where copper reaches a pad. +${credits} credits.`,
@@ -668,12 +745,17 @@ function fillCopper(state) {
 function receiverAvailable(state, port) {
   if (state.circuit.packets.some((packet) => packet.receiver.id === port.id)) return false;
   if (port.kind === 'destination') return state.targetSlots.some((slot) => !slot.delivered);
+  if (port.kind === 'pin') return !state.circuit.pinOutputs[port.id];
   const gate = state.gateState[port.gateId];
   return Boolean(gate && !gate.pendingOutput && !gate.inputs[port.inputId]);
 }
 
 function receiveCircuitBit(level, state, packet) {
   const { receiver, bit } = packet;
+  if (receiver.kind === 'pin') return { ...state,
+    circuit: { ...state.circuit, pinOutputs: { ...state.circuit.pinOutputs, [receiver.id]: bit }, pinTransfers: state.circuit.pinTransfers + 1 },
+    message: `${receiver.label} received ${bit.value}. Walk over this tungsten pin to collect it.` };
+
   if (receiver.kind === 'gate') {
     return depositCargo(level, { ...state, cargo: [...state.cargo, bit] }, bit.id, { ...receiver, viaWire: true });
   }
@@ -699,7 +781,7 @@ export function advanceCircuit(level, state, delta) {
   if (!level.circuit || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
   const pendingDriver = Object.values(state.circuit.sources).some(Boolean)
     || level.gates.some((gate) => gate.wired && state.gateState[gate.id].pendingOutput);
-  if (!state.circuit.packets.length && !pendingDriver) return state;
+  if (!state.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, state);
   const packets = state.circuit.packets.map((packet) => ({ ...packet, progress: packet.progress + delta * SIGNAL_SPEED }));
   const arriving = packets.filter((packet) => packet.progress >= Math.max(1, packet.route.length - 1));
   let next = state.circuit.packets.length
@@ -712,19 +794,19 @@ export function advanceCircuit(level, state, delta) {
   nets.forEach((net) => {
     if (net.conflict || net.cycle || net.drivers.length !== 1 || !net.receivers.length) return;
     const driver = net.drivers[0];
-    const bit = driver.kind === 'source' ? next.circuit.sources[driver.id] : next.gateState[driver.gateId].pendingOutput;
+    const bit = ['source', 'pin'].includes(driver.kind) ? next.circuit.sources[driver.id] : next.gateState[driver.gateId].pendingOutput;
     if (!bit || !net.receivers.every((receiver) => receiverAvailable(next, receiver))) return;
     // Fan-out creates one copy per connected input, exactly once for this finite source token.
     const outgoing = net.receivers.map((receiver) => ({
       id: `${bit.id}->${receiver.id}`,
       bit: { id: `${bit.id}->${receiver.id}`, value: bit.value },
-      receiver, route: wireRoute(net, driver, receiver), progress: 0,
+      driverId: driver.id, receiver, route: wireRoute(net, driver, receiver), progress: 0,
     }));
     next = {
       ...next,
       circuit: {
         ...next.circuit,
-        sources: driver.kind === 'source' ? { ...next.circuit.sources, [driver.id]: null } : next.circuit.sources,
+        sources: ['source', 'pin'].includes(driver.kind) ? { ...next.circuit.sources, [driver.id]: null } : next.circuit.sources,
         packets: [...next.circuit.packets, ...outgoing],
       },
       gateState: driver.kind === 'gateOutput'
@@ -733,5 +815,5 @@ export function advanceCircuit(level, state, delta) {
       message: `${driver.label} sent ${bit.value} through copper to ${net.receivers.map((port) => port.label).join(', ')}.`,
     };
   });
-  return collectGateOutputs(level, next);
+  return collectPinOutputs(level, collectGateOutputs(level, next));
 }

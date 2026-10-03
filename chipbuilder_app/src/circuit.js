@@ -7,6 +7,13 @@ export const cellPosition = ({ col, row }) => ({
   y: -TERRAIN_DEPTH / 2 + (row + 0.5) * TILE_DEPTH,
 });
 
+// A contact is an overlay: the copper below stays connected and walkable.
+export function wirePins(terrain) {
+  return (terrain || []).flatMap((cells, row) => cells.flatMap((cell, col) =>
+    cell.contact === 'tungsten' && cell.material === 'copper' && cell.height === 1
+      ? [{ id: `pin-${col}-${row}`, col, row, ...cellPosition({ col, row }) }] : []));
+}
+
 // Copper has no direction. Four-neighbour connectivity defines passive electrical nets.
 export function wireNets(terrain, ports) {
   const remaining = new Map();

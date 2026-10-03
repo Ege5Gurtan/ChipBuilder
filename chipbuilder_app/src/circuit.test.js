@@ -158,3 +158,99 @@ test('existing pass-through NOT and normal carrier delivery still work', () => {
   expect(held.cargo[0].value).toBe(1);
   expect(attemptSignalDelivery(mission, { ...held, player: mission.destination }).status).toBe('success');
 });
+
+const sourcePinLevel = levels.find((item) => item.id === 'build-source-pin');
+const twoPinLevel = levels.find((item) => item.id === 'build-wire-pins');
+function makePins(state, cells) {
+  cells.forEach(([col, row], i) => { state = fabricateCell(state, 'lithography', col, row, i === 0); });
+  return applyTerrainProcess(state, 'tungsten');
+}
+
+test('missing SRC cannot load until tungsten creates a walkable copper contact; supplied gate pads work immediately', () => {
+  let state = withCargo(createGame(sourcePinLevel));
+  const absent = depositCargo(sourcePinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
+  expect(absent.cargo).toEqual(state.cargo);
+  expect(absent.message).toMatch(/no pin yet/);
+  state = makePins(state, [[2, 5]]);
+  expect(state.terrain[5][2]).toMatchObject({ material: 'copper', height: 1, contact: 'tungsten', masked: false });
+  expect(state.cost.manufacturing).toBe(46);
+  const result = run(depositCargo(sourcePinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' }), sourcePinLevel);
+  expect(result.status).toBe('success');
+  expect(result.gateState['pin-not'].activations).toBe(1);
+  expect(result.terrain.flat().filter((cell) => cell.contact === 'tungsten')).toHaveLength(1);
+});
+
+test('tungsten requires a copper pattern; invalid masks and existing pins charge no deposition cost', () => {
+  const bare = createGame(sourcePinLevel);
+  expect(applyTerrainProcess(bare, 'tungsten').cost).toEqual(bare.cost);
+  const invalid = fabricateCell(bare, 'lithography', 2, 4, true);
+  const rejected = applyTerrainProcess(invalid, 'tungsten');
+  expect(rejected.terrain).toBe(invalid.terrain);
+  expect(rejected.cost).toEqual(invalid.cost);
+  expect(rejected.message).toMatch(/need copper/);
+  const supplied = fabricateCell(bare, 'lithography', 7, 5, true);
+  expect(applyTerrainProcess(supplied, 'tungsten').cost).toEqual(supplied.cost);
+  const pin = makePins(bare, [[2, 5]]);
+  const duplicate = fabricateCell(pin, 'lithography', 2, 5, true);
+  expect(applyTerrainProcess(duplicate, 'tungsten').cost).toEqual(duplicate.cost);
+});
+
+test.each([[2, 15], [15, 2]])('two tungsten pins send in either direction (%s → %s) and output pickup happens once', (from, to) => {
+  let state = withCargo(makePins(createGame(twoPinLevel), [[2, 5], [15, 5]]), 1);
+  expect(attemptSignalDelivery(twoPinLevel, { ...state, player: twoPinLevel.destination }).status).toBe('playing');
+  state = depositCargo(twoPinLevel, state, 'test-bit', { kind: 'source', sourceId: `pin-${from}-5` });
+  state = run(state, twoPinLevel);
+  expect(state.circuit.pinTransfers).toBe(1);
+  expect(state.circuit.pinOutputs[`pin-${to}-5`].value).toBe(1);
+  expect(state.cargo).toHaveLength(0);
+  const pin = circuitConnections(twoPinLevel, state).find((port) => port.id === `pin-${to}-5`);
+  const collected = run({ ...state, player: pin }, twoPinLevel);
+  expect(collected.cargo.map((bit) => bit.value)).toEqual([1]);
+  expect(run(collected, twoPinLevel).cargo).toEqual(collected.cargo);
+  expect(collected.cost.energy).toBe(state.cost.energy + 1);
+  expect(attemptSignalDelivery(twoPinLevel, { ...collected, player: twoPinLevel.destination }).status).toBe('success');
+});
+
+test('output pins apply backpressure and cannot inject against another active driver', () => {
+  let state = withCargo(makePins(createGame(twoPinLevel), [[2, 5], [15, 5]]), 1);
+  state = depositCargo(twoPinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
+  const competing = depositCargo(twoPinLevel, withCargo(state), 'test-bit', { kind: 'source', sourceId: 'pin-15-5' });
+  expect(competing.cargo).toHaveLength(1);
+  expect(competing.circuit.sources['pin-15-5']).toBeUndefined();
+  state = run(state, twoPinLevel);
+  state = depositCargo(twoPinLevel, { ...state, cargo: [{ id: 'second', value: 0 }] }, 'second', { kind: 'source', sourceId: 'pin-2-5' });
+  expect(run(state, twoPinLevel).circuit.sources['pin-2-5'].id).toBe('second');
+  expect(state.circuit.pinTransfers).toBe(1);
+});
+
+test('undo removes tungsten, refunds fabrication only, and salvages a queued bit', () => {
+  let state = withCargo(makePins(createGame(sourcePinLevel), [[2, 5]]));
+  state = depositCargo(sourcePinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
+  const undone = undoTerrainEdit({ ...state, cost: { ...state.cost, energy: 9 } });
+  expect(undone.terrain[5][2].contact).toBeUndefined();
+  expect(undone.terrain[5][2].masked).toBe(true);
+  expect(undone.cost).toEqual({ processSteps: 1, manufacturing: 20, energy: 9 });
+  expect(undone.cargo).toEqual([{ id: 'test-bit', value: 0 }]);
+  expect(undone.circuit.sources['pin-2-5']).toBeUndefined();
+});
+
+test('etching away an occupied output pin returns its bit and breaks copper continuity', () => {
+  let state = withCargo(makePins(createGame(twoPinLevel), [[2, 5], [15, 5]]), 1);
+  state = run(depositCargo(twoPinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' }), twoPinLevel);
+  state = fabricateCell(state, 'lithography', 15, 5, true);
+  const etched = applyTerrainProcess(state, 'etch');
+  expect(etched.terrain[5][15]).toMatchObject({ height: 0, contact: null });
+  expect(etched.cargo.map((bit) => bit.value)).toEqual([1]);
+  expect(etched.circuit.pinOutputs).toEqual({});
+});
+
+test('K loads a nearby created pin and supplied pads in a mixed mask need no extra tungsten', () => {
+  let state = makePins(createGame(sourcePinLevel), [[2, 5], [7, 5], [11, 5], [15, 5]]);
+  expect(state.terrain.flat().filter((cell) => cell.contact === 'tungsten')).toHaveLength(1);
+  expect(state.cost.manufacturing).toBe(52); // 26 mask + 26 tungsten; supplied pads skipped.
+  state = withCargo(state);
+  const pin = circuitConnections(sourcePinLevel, state).find((port) => port.id === 'pin-2-5');
+  const sent = dropCargoBit(sourcePinLevel, { ...state, player: pin }, 'test-bit');
+  expect(sent.cargo).toHaveLength(0);
+  expect(run(sent, sourcePinLevel).status).toBe('success');
+});
