@@ -253,7 +253,7 @@ function App() {
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
-              <small>Drop selected cargo bit</small>
+              <small>Load nearby gate input / drop bit</small>
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
@@ -319,7 +319,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {socketGates.length > 0 && ' Drag a bit onto a physical gate port, or select it and click the port on the wafer.'}
+              {socketGates.length > 0 && ' Drive next to A/B and press K, drag a bit onto a port, or select it and click the port.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
               {game.cargo.length === 0 && <span className="empty-state">Move over a bit to collect it.</span>}
@@ -394,8 +394,8 @@ function App() {
                   </span>
                 </div>
                 <p className="microcopy">
-                  Use the physical A/B ports on the wafer. Drag a cargo bit onto a port, or select a bit and click the port.
-                  Click a loaded input to take it back before the second input is loaded.
+                  Use the physical A/B ports on the wafer. The easiest method is to drive next to an empty port and press K.
+                  Drag/drop and select + click also work. Click a loaded input to take it back before the second input is loaded.
                 </p>
                 <p className="gate-reason">
                   When both inputs are loaded, they are consumed and one new output bit appears at OUT. Walk over OUT to collect it.

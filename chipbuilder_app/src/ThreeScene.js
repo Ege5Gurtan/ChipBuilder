@@ -1,7 +1,7 @@
 import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
-import { gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
+import { GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
@@ -141,16 +141,22 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
         group.userData.socket = key;
 
         const ringMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7d7c, emissive: 0x000000, metalness: 0.35, roughness: 0.45 });
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.055, 8, 28), ringMaterial);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.075, 8, 32), ringMaterial);
         ring.rotation.x = Math.PI / 2; ring.userData.socket = key; group.add(ring);
 
         const pad = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.19, 0.19, 0.08, 20),
+          new THREE.CylinderGeometry(0.27, 0.27, 0.09, 24),
           new THREE.MeshStandardMaterial({ color: 0x182829, metalness: 0.2, roughness: 0.6 })
         );
         pad.userData.socket = key; group.add(pad);
 
-        const inputLabel = label(input.label, '#d7dfdc'); inputLabel.position.y = 0.5; group.add(inputLabel);
+        const hitTarget = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.49, 0.49, 0.08, 20),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+        );
+        hitTarget.userData.socket = key; group.add(hitTarget);
+
+        const inputLabel = label(input.label, '#d7dfdc'); inputLabel.position.y = 0.62; group.add(inputLabel);
         const loadedZero = orb(0x72e2d4, 0.2); loadedZero.position.y = 0.13; loadedZero.visible = false; group.add(loadedZero);
         const zeroLabel = label('0'); zeroLabel.position.y = 0.48; loadedZero.add(zeroLabel);
         const loadedOne = orb(0xffc87a, 0.2); loadedOne.position.y = 0.13; loadedOne.visible = false; group.add(loadedOne);
@@ -172,7 +178,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
         const group = new THREE.Group();
         group.position.set(position.x, 0.72, -position.y);
         const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(0.31, 0.06, 8, 28),
+          new THREE.TorusGeometry(0.39, 0.075, 8, 32),
           new THREE.MeshStandardMaterial({ color: 0x9a7a39, emissive: 0x000000, metalness: 0.35, roughness: 0.4 })
         );
         ring.rotation.x = Math.PI / 2; group.add(ring);
@@ -336,9 +342,15 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const loaded = game.gateState[gateId]?.inputs?.[inputId];
       port.loadedZero.visible = loaded?.value === 0;
       port.loadedOne.visible = loaded?.value === 1;
-      const hovering = hoveredSocket === socket && !loaded;
-      port.ring.material.color.setHex(hovering ? 0xefbd55 : loaded ? 0x63d9d0 : 0x6b7d7c);
-      port.ring.material.emissive.setHex(hovering ? 0x5a3c00 : loaded ? 0x123b38 : 0x000000);
+      const gate = level.gates.find((item) => item.id === gateId);
+      const position = gate ? gateInputPosition(gate, inputId) : null;
+      const nearCarrier = position
+        ? Math.hypot(game.player.x - position.x, game.player.y - position.y) <= GATE_INPUT_INTERACTION_RADIUS
+        : false;
+      const highlighted = (hoveredSocket === socket || nearCarrier) && !loaded;
+      port.ring.material.color.setHex(highlighted ? 0xefbd55 : loaded ? 0x63d9d0 : 0x6b7d7c);
+      port.ring.material.emissive.setHex(highlighted ? 0x6b4700 : loaded ? 0x123b38 : 0x000000);
+      port.ring.material.emissiveIntensity = highlighted ? 1.35 : 1;
     });
     refs.outputPorts.forEach((port, gateId) => {
       const pending = game.gateState[gateId]?.pendingOutput;

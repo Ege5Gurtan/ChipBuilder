@@ -3,6 +3,7 @@ import { createTerrain, FAB_TOOLS, terrainMaterial } from './terrain.js';
 export const PLAYER_RADIUS = 0.34;
 export const PICKUP_RADIUS = 0.62;
 export const DESTINATION_RADIUS = 0.72;
+export const GATE_INPUT_INTERACTION_RADIUS = 0.92;
 const DROP_DISTANCE = 0.45;
 
 // Unary gates transform carried cargo automatically when the carrier crosses them.
@@ -17,7 +18,7 @@ export function gateInputPosition(gate, inputId) {
   const { width, height } = gateFootprint(gate);
   const count = Math.max(1, gate.inputs?.length || 1);
   const index = Math.max(0, gate.inputs?.findIndex((input) => input.id === inputId) ?? 0);
-  const offset = count === 1 ? 0 : (0.5 - index / (count - 1)) * height * 0.65;
+  const offset = count === 1 ? 0 : (0.5 - index / (count - 1)) * height * 0.82;
   return { x: gate.x - width / 2 - 0.42, y: gate.y + offset };
 }
 
@@ -239,9 +240,31 @@ export function attemptSignalDelivery(level, state) {
   };
 }
 
+function nearestOpenGateInput(level, state) {
+  let nearest = null;
+  level.gates.filter((gate) => !isPassThroughGate(gate)).forEach((gate) => {
+    const currentGate = state.gateState[gate.id];
+    if (!currentGate || currentGate.pendingOutput) return;
+    gate.inputs?.forEach((input) => {
+      if (currentGate.inputs[input.id] !== undefined) return;
+      const position = gateInputPosition(gate, input.id);
+      const distance = Math.hypot(state.player.x - position.x, state.player.y - position.y);
+      if (distance <= GATE_INPUT_INTERACTION_RADIUS && (!nearest || distance < nearest.distance)) {
+        nearest = { gateId: gate.id, inputId: input.id, distance };
+      }
+    });
+  });
+  return nearest;
+}
+
 export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
+  const gateTarget = nearestOpenGateInput(level, state);
+  if (gateTarget) {
+    return depositCargo(level, state, item.id, { kind: 'gate', gateId: gateTarget.gateId, inputId: gateTarget.inputId });
+  }
+
   const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
   const spot = directions
     .map(([dx, dy]) => {
