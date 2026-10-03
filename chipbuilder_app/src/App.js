@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reorderCargo } from './gameRules.js';
+import { attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -30,6 +30,7 @@ function App() {
   const suppressClick = useRef(false);
   const itemRefs = useRef(new Map());
   const keyboardNav = useRef(false);
+  const sceneRef = useRef(null);
   const level = levels[levelIndex];
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
   const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate));
@@ -94,7 +95,21 @@ function App() {
     setSelectedCargoId(null);
   };
 
-  const socketAt = (x, y) => document.elementFromPoint(x, y)?.closest('[data-socket]:not(:disabled)')?.dataset.socket || null;
+  const socketAt = (x, y) => sceneRef.current?.gateSocketAtClientPoint(x, y) || null;
+
+  const interactWithGateSocket = (gateId, inputId) => {
+    const loaded = game.gateState[gateId]?.inputs?.[inputId];
+    if (loaded !== undefined) {
+      setGame((current) => reclaimGateInput(level, current, gateId, inputId));
+      return;
+    }
+    if (!selectedId) {
+      setGame((current) => ({ ...current, message: 'Select a cargo bit, or drag one from cargo onto an empty gate input port.' }));
+      return;
+    }
+    setGame((current) => depositCargo(level, current, selectedId, { kind: 'gate', gateId, inputId }));
+    setSelectedCargoId(null);
+  };
 
   const cargoPointerDown = (event, id) => {
     suppressClick.current = false;
@@ -259,7 +274,16 @@ function App() {
         </aside>
 
         <section className="wafer-panel">
-          <ThreeScene level={level} game={game} onMove={handleMove} onPaint={paintTerrain} tool={selectedTool} />
+          <ThreeScene
+            ref={sceneRef}
+            level={level}
+            game={game}
+            onMove={handleMove}
+            onPaint={paintTerrain}
+            onGateSocketClick={interactWithGateSocket}
+            hoveredSocket={drag?.socket || null}
+            tool={selectedTool}
+          />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
             <p>{game.message}</p>
@@ -298,7 +322,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {socketGates.length > 0 && ' Drag or click a bit onto a gate socket.'}
+              {socketGates.length > 0 && ' Drag a bit onto a physical gate port, or select it and click the port on the wafer.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
               {game.cargo.length === 0 && <span className="empty-state">Move over a bit to collect it.</span>}
@@ -352,41 +376,32 @@ function App() {
                 </section>
               );
             }
+            const pendingOutput = game.worldBits.some((bit) => bit.sourceGateId === gate.id);
             return (
               <section className="tool-section gate-section" key={gate.id}>
                 <div className="section-heading">
                   <span>02</span>
                   <h3>{gate.type} gate</h3>
                 </div>
-                <div className="gate-diagram">
-                  <div className="gate-inputs">
-                    {gate.inputs.map((input) => {
-                      const value = currentGate.inputs[input.id];
-                      const socket = `${gate.id}:${input.id}`;
-                      return (
-                        <button
-                          key={input.id}
-                          data-socket={socket}
-                          className={`input-socket ${drag?.socket === socket ? 'drop-hover' : ''}`}
-                          disabled={value !== undefined}
-                          onClick={() => deposit(selectedId, { kind: 'gate', gateId: gate.id, inputId: input.id })}
-                        >
-                          <span>{input.label}</span>
-                          {value === undefined ? 'drop' : <Bit value={value} />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="gate-body">{gate.type}</div>
-                  <div className="gate-output">
-                    <span>OUT</span>
-                    {currentGate.output === null ? '—' : <Bit value={currentGate.output} />}
-                  </div>
+                <div className="gate-status-row" aria-label={`${gate.type} gate port status`}>
+                  {gate.inputs.map((input) => {
+                    const loaded = currentGate.inputs[input.id];
+                    return (
+                      <span key={input.id} className={`gate-status-chip ${loaded ? 'loaded' : ''}`}>
+                        {input.label}: {loaded ? loaded.value : 'empty'}
+                      </span>
+                    );
+                  })}
+                  <span className={`gate-status-chip ${pendingOutput ? 'output-ready' : ''}`}>
+                    OUT: {pendingOutput ? 'bit ready' : 'empty'}
+                  </span>
                 </div>
+                <p className="microcopy">
+                  Use the physical A/B ports on the wafer. Drag a cargo bit onto a port, or select a bit and click the port.
+                  Click a loaded input to take it back before the second input is loaded.
+                </p>
                 <p className="gate-reason">
-                  {currentGate.output === null
-                    ? `${gate.type} is waiting for ${gate.inputs.length - Object.keys(currentGate.inputs).length} input(s).`
-                    : game.message}
+                  When both inputs are loaded, they are consumed and one new output bit appears at OUT. Walk over OUT to collect it.
                 </p>
               </section>
             );

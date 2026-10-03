@@ -13,6 +13,19 @@ export function gateFootprint(gate) {
   return GATE_FOOTPRINTS[gate.type] || { width: 1.6, height: 1.3 };
 }
 
+export function gateInputPosition(gate, inputId) {
+  const { width, height } = gateFootprint(gate);
+  const count = Math.max(1, gate.inputs?.length || 1);
+  const index = Math.max(0, gate.inputs?.findIndex((input) => input.id === inputId) ?? 0);
+  const offset = count === 1 ? 0 : (0.5 - index / (count - 1)) * height * 0.65;
+  return { x: gate.x - width / 2 - 0.42, y: gate.y + offset };
+}
+
+export function gateOutputPosition(gate) {
+  const { width } = gateFootprint(gate);
+  return { x: gate.x + width / 2 + 0.48, y: gate.y };
+}
+
 export function isPassThroughGate(gate) {
   return Boolean(PASS_THROUGH_GATES[gate.type]);
 }
@@ -40,7 +53,7 @@ export function createGame(level) {
     feedback: null,
     gateEvent: null,
     gateState: Object.fromEntries(
-      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, inside: false }])
+      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, inside: false, activations: 0 }])
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain ? createTerrain() : null,
@@ -246,25 +259,74 @@ export function depositCargo(level, state, cargoId, target) {
   const currentGate = state.gateState[gate.id];
   if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
-  const inputs = { ...currentGate.inputs, [input.id]: cargo.value };
+  if (state.worldBits.some((bit) => bit.sourceGateId === gate.id)) {
+    return { ...state, message: `${gate.type} OUT is occupied. Collect the output bit before loading another pair.` };
+  }
+
+  const inputs = { ...currentGate.inputs, [input.id]: { id: cargo.id, value: cargo.value } };
   const complete = gate.inputs.every((item) => inputs[item.id] !== undefined);
-  const output = complete ? gateOutput(gate.type, gate.inputs.map((item) => inputs[item.id])) : null;
-  const outputCargo = complete
-    ? [{ id: `${gate.id}-output`, value: output }]
-    : [];
-  const reason = complete
-    ? `${gate.type} sees ${gate.inputs.map((item) => `${item.label}=${inputs[item.id]}`).join(', ')}; output is ${output}.`
-    : `${input.label} received ${cargo.value}. One distinct input remains.`;
+  const cargoWithoutInput = state.cargo.filter((item) => item.id !== cargoId);
+
+  if (!complete) {
+    return {
+      ...state,
+      cargo: cargoWithoutInput,
+      gateState: {
+        ...state.gateState,
+        [gate.id]: { ...currentGate, inputs },
+      },
+      cost: { ...state.cost, energy: state.cost.energy + 1 },
+      message: `${input.label} loaded with ${cargo.value}. Click the loaded port to take it back, or load the remaining input.`,
+    };
+  }
+
+  const values = gate.inputs.map((item) => inputs[item.id].value);
+  const output = gateOutput(gate.type, values);
+  const activation = currentGate.activations + 1;
+  const outputId = `${gate.id}-output-${activation}`;
+  const outputPosition = gateOutputPosition(gate);
 
   return {
     ...state,
-    cargo: [...state.cargo.filter((item) => item.id !== cargoId), ...outputCargo],
+    cargo: cargoWithoutInput,
+    worldBits: [
+      ...state.worldBits,
+      { id: outputId, value: output, ...outputPosition, armed: true, sourceGateId: gate.id },
+    ],
     gateState: {
       ...state.gateState,
-      [gate.id]: { inputs, output },
+      [gate.id]: { ...currentGate, inputs: {}, output, activations: activation },
+    },
+    gateEvent: {
+      seq: (state.gateEvent?.seq || 0) + 1,
+      gateId: gate.id,
+      gateType: gate.type,
+      ids: [outputId],
     },
     cost: { ...state.cost, energy: state.cost.energy + 2 },
-    message: reason,
+    message: `${gate.type} consumed ${gate.inputs.map((item) => `${item.label}=${inputs[item.id].value}`).join(', ')} and produced ${output} at OUT. Walk over the output bit to collect it.`,
+  };
+}
+
+export function reclaimGateInput(level, state, gateId, inputId) {
+  if (state.status !== 'playing') return state;
+  const gate = level.gates.find((item) => item.id === gateId);
+  if (!gate || isPassThroughGate(gate)) return state;
+  const currentGate = state.gateState[gate.id];
+  const loaded = currentGate?.inputs?.[inputId];
+  if (!loaded) return state;
+
+  const input = gate.inputs?.find((item) => item.id === inputId);
+  const inputs = { ...currentGate.inputs };
+  delete inputs[inputId];
+  return {
+    ...state,
+    cargo: [...state.cargo, loaded],
+    gateState: {
+      ...state.gateState,
+      [gate.id]: { ...currentGate, inputs },
+    },
+    message: `${input?.label || inputId} returned to cargo. The gate has not consumed it.`,
   };
 }
 

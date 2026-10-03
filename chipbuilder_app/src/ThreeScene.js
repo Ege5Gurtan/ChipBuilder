@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH } from './terrain.js';
-import { gateFootprint } from './gameRules.js';
+import { gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
@@ -34,14 +34,45 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, tool }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
   const paintRef = useRef(onPaint);
+  const gateSocketClickRef = useRef(onGateSocketClick);
   const toolRef = useRef(tool);
   const gameRef = useRef(game);
   const visuals = useRef(null);
-  useEffect(() => { moveRef.current = onMove; paintRef.current = onPaint; toolRef.current = tool; gameRef.current = game; });
+  useEffect(() => {
+    moveRef.current = onMove;
+    paintRef.current = onPaint;
+    gateSocketClickRef.current = onGateSocketClick;
+    toolRef.current = tool;
+    gameRef.current = game;
+  });
+
+  useImperativeHandle(ref, () => ({
+    gateSocketAtClientPoint(clientX, clientY) {
+      const refs = visuals.current;
+      if (!refs?.gateHitTargets?.length) return null;
+      const bounds = refs.renderer.domElement.getBoundingClientRect();
+      if (clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom) return null;
+      const pointer = new THREE.Vector2(
+        (clientX - bounds.left) / bounds.width * 2 - 1,
+        -(clientY - bounds.top) / bounds.height * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(pointer, refs.camera);
+      const hit = raycaster.intersectObjects(refs.gateHitTargets, true)[0];
+      let object = hit?.object;
+      while (object && !object.userData.socket) object = object.parent;
+      const socket = object?.userData.socket || null;
+      if (!socket) return null;
+      const [gateId, inputId] = socket.split(':');
+      if (gameRef.current.gateState[gateId]?.inputs?.[inputId] !== undefined) return null;
+      if (gameRef.current.worldBits.some((bit) => bit.sourceGateId === gateId)) return null;
+      return socket;
+    },
+  }), []);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -92,15 +123,75 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       mesh.position.set(obstacle.x, 0.53, -obstacle.y); scene.add(mesh); obstacles.set(obstacle.id, mesh);
     });
     const gateMeshes = new Map();
+    const gatePorts = new Map();
+    const outputPorts = new Map();
+    const gateHitTargets = [];
     level.gates.forEach((gate) => {
       const { width, height } = gateFootprint(gate);
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, 0.55, height), new THREE.MeshStandardMaterial({ color: 0x3d5556 }));
       mesh.position.set(gate.x, 0.5, -gate.y); scene.add(mesh);
       gateMeshes.set(gate.id, mesh);
       const text = label(gate.type, '#f2d078'); text.position.set(gate.x, 1.12, -gate.y); scene.add(text);
+
+      gate.inputs?.forEach((input) => {
+        const key = `${gate.id}:${input.id}`;
+        const position = gateInputPosition(gate, input.id);
+        const group = new THREE.Group();
+        group.position.set(position.x, 0.72, -position.y);
+        group.userData.socket = key;
+
+        const ringMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7d7c, emissive: 0x000000, metalness: 0.35, roughness: 0.45 });
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.055, 8, 28), ringMaterial);
+        ring.rotation.x = Math.PI / 2; ring.userData.socket = key; group.add(ring);
+
+        const pad = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.19, 0.19, 0.08, 20),
+          new THREE.MeshStandardMaterial({ color: 0x182829, metalness: 0.2, roughness: 0.6 })
+        );
+        pad.userData.socket = key; group.add(pad);
+
+        const inputLabel = label(input.label, '#d7dfdc'); inputLabel.position.y = 0.5; group.add(inputLabel);
+        const loadedZero = orb(0x72e2d4, 0.2); loadedZero.position.y = 0.13; loadedZero.visible = false; group.add(loadedZero);
+        const zeroLabel = label('0'); zeroLabel.position.y = 0.48; loadedZero.add(zeroLabel);
+        const loadedOne = orb(0xffc87a, 0.2); loadedOne.position.y = 0.13; loadedOne.visible = false; group.add(loadedOne);
+        const oneLabel = label('1'); oneLabel.position.y = 0.48; loadedOne.add(oneLabel);
+
+        const trace = new THREE.Mesh(
+          new THREE.BoxGeometry(0.44, 0.07, 0.07),
+          new THREE.MeshStandardMaterial({ color: 0x849493, metalness: 0.45, roughness: 0.4 })
+        );
+        trace.position.set(gate.x - width / 2 - 0.2, 0.68, -position.y); scene.add(trace);
+
+        scene.add(group);
+        gatePorts.set(key, { group, ring, loadedZero, loadedOne });
+        gateHitTargets.push(group);
+      });
+
+      if (gate.inputs?.length) {
+        const position = gateOutputPosition(gate);
+        const group = new THREE.Group();
+        group.position.set(position.x, 0.72, -position.y);
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.31, 0.06, 8, 28),
+          new THREE.MeshStandardMaterial({ color: 0x9a7a39, emissive: 0x000000, metalness: 0.35, roughness: 0.4 })
+        );
+        ring.rotation.x = Math.PI / 2; group.add(ring);
+        const outputLabel = label('OUT', '#ffd77d'); outputLabel.position.y = 0.52; group.add(outputLabel);
+        const trace = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.07, 0.07),
+          new THREE.MeshStandardMaterial({ color: 0xb08b45, metalness: 0.45, roughness: 0.4 })
+        );
+        trace.position.set(gate.x + width / 2 + 0.23, 0.68, -position.y); scene.add(trace);
+        scene.add(group);
+        outputPorts.set(gate.id, { group, ring });
+      }
     });
     const gatePulse = { mesh: null, start: 0 };
-    visuals.current = { player, bits, bitMesh, obstacles, tiles, materials, pulse, gateMeshes, gatePulse, clock: null, feedbackSeq: 0, gateSeq: 0 };
+    visuals.current = {
+      renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, pulse,
+      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse,
+      clock: null, feedbackSeq: 0, gateSeq: 0,
+    };
 
     const keys = new Set();
     const keyDown = (event) => {
@@ -141,10 +232,24 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
     };
     const move = (event) => { if (painting) paint(event); };
     const up = () => { painting = false; touched.clear(); };
+    const gateClick = (event) => {
+      if (event.button !== 0 || !gateHitTargets.length) return;
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(gateHitTargets, true)[0];
+      let object = hit?.object;
+      while (object && !object.userData.socket) object = object.parent;
+      const socket = object?.userData.socket;
+      if (!socket) return;
+      const [gateId, inputId] = socket.split(':');
+      gateSocketClickRef.current?.(gateId, inputId);
+    };
     renderer.domElement.addEventListener('pointerdown', down);
     renderer.domElement.addEventListener('pointermove', move);
     renderer.domElement.addEventListener('pointerup', up);
     renderer.domElement.addEventListener('pointercancel', up);
+    renderer.domElement.addEventListener('click', gateClick);
 
     const resize = () => {
       const width = Math.max(1, mount.clientWidth), height = Math.max(1, mount.clientHeight);
@@ -188,6 +293,7 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', clearKeys);
       renderer.domElement.removeEventListener('pointerdown', down); renderer.domElement.removeEventListener('pointermove', move);
       renderer.domElement.removeEventListener('pointerup', up); renderer.domElement.removeEventListener('pointercancel', up);
+      renderer.domElement.removeEventListener('click', gateClick);
       visuals.current = null;
       const geometries = new Set(), ownedMaterials = new Set();
       scene.traverse((object) => {
@@ -213,6 +319,20 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       present.add(bit.id);
     });
     refs.bits.forEach((mesh, id) => { if (!present.has(id)) mesh.visible = false; });
+    refs.gatePorts.forEach((port, socket) => {
+      const [gateId, inputId] = socket.split(':');
+      const loaded = game.gateState[gateId]?.inputs?.[inputId];
+      port.loadedZero.visible = loaded?.value === 0;
+      port.loadedOne.visible = loaded?.value === 1;
+      const hovering = hoveredSocket === socket && !loaded;
+      port.ring.material.color.setHex(hovering ? 0xefbd55 : loaded ? 0x63d9d0 : 0x6b7d7c);
+      port.ring.material.emissive.setHex(hovering ? 0x5a3c00 : loaded ? 0x123b38 : 0x000000);
+    });
+    refs.outputPorts.forEach((port, gateId) => {
+      const ready = game.worldBits.some((bit) => bit.sourceGateId === gateId);
+      port.ring.material.color.setHex(ready ? 0xefbd55 : 0x9a7a39);
+      port.ring.material.emissive.setHex(ready ? 0x5a3c00 : 0x000000);
+    });
     const seq = game.feedback?.seq || 0;
     if (seq !== refs.feedbackSeq) {
       refs.feedbackSeq = seq;
@@ -236,7 +356,9 @@ export default function ThreeScene({ level, game, onMove, onPaint, tool }) {
       const heights = { silicon: 0.48, oxide: 1.13, trench: 0.13, rough: 0.81, metal: 0.59 };
       mesh.scale.y = heights[cell.type]; mesh.position.y = heights[cell.type] / 2;
     });
-  }, [game, level]);
+  }, [game, hoveredSocket, level]);
 
   return <div className="wafer-stage" ref={mountRef} aria-label="Tilted 3D semiconductor wafer play field" />;
-}
+});
+
+export default ThreeScene;

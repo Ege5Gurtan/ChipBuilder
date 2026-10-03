@@ -160,16 +160,13 @@ kbd {
 .bit-1 { color: var(--gold); }
 .bit-0 { color: var(--cyan); }
 
-.gate-diagram { display: grid; grid-template-columns: 1fr 72px 48px; align-items: center; gap: 8px; margin-top: 13px; }
-.gate-inputs { display: grid; gap: 5px; }
-.input-socket, .gate-output {
-  min-height: 40px; border: 1px dashed #637171; border-radius: 3px; background: #151d1f;
-  color: var(--muted); display: flex; align-items: center; justify-content: space-between; padding: 7px; font-size: 10px;
+.gate-status-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.gate-status-chip {
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; background: #151d1f;
+  color: var(--muted); font: 700 10px Bahnschrift, sans-serif; text-transform: uppercase; letter-spacing: .05em;
 }
-.input-socket:not(:disabled) { cursor: pointer; }
-.input-socket.drop-hover { border: 1px solid var(--gold); background: rgba(239,189,85,.1); }
-.gate-body { height: 60px; display: grid; place-items: center; background: #34494a; border: 1px solid #587071; border-radius: 3px; font-weight: 800; font-size: 12px; }
-.gate-output { flex-direction: column; justify-content: center; }
+.gate-status-chip.loaded { border-color: var(--cyan); color: var(--cyan); background: rgba(99,217,208,.08); }
+.gate-status-chip.output-ready { border-color: var(--gold); color: var(--gold); background: rgba(239,189,85,.08); }
 .gate-reason { margin-bottom: 0; color: var(--gold); }
 .gate-passthrough {
   margin-top: 13px; padding: 12px; display: flex; align-items: center; justify-content: space-between;
