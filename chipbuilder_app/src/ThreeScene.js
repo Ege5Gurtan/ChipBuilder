@@ -34,17 +34,19 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket }, ref) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onPaint, onGateSocketClick, hoveredSocket, allowLithography = true }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
   const paintRef = useRef(onPaint);
   const gateSocketClickRef = useRef(onGateSocketClick);
+  const allowLithographyRef = useRef(allowLithography);
   const gameRef = useRef(game);
   const visuals = useRef(null);
   useEffect(() => {
     moveRef.current = onMove;
     paintRef.current = onPaint;
     gateSocketClickRef.current = onGateSocketClick;
+    allowLithographyRef.current = allowLithography;
     gameRef.current = game;
   });
 
@@ -219,7 +221,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(tileMeshes, false)[0];
-      if (!hit || !gameRef.current.terrain) return;
+      if (!allowLithographyRef.current || !hit || !gameRef.current.terrain) return;
       const { col, row } = hit.object.userData;
       const id = `${col}:${row}`;
       if (touched.has(id)) return;
@@ -229,7 +231,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (valid) strokeStarted = true;
     };
     const down = (event) => {
-      if (!gameRef.current.terrain || event.button !== 0) return;
+      if (!allowLithographyRef.current || !gameRef.current.terrain || event.button !== 0) return;
       painting = true; strokeStarted = false; touched.clear();
       renderer.domElement.setPointerCapture(event.pointerId); paint(event);
     };

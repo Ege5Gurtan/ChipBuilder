@@ -57,7 +57,9 @@ export function createGame(level) {
       level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 }])
     ),
     fabrication: { patterned: false, etched: false },
-    terrain: level.fabrication?.terrain ? createTerrain() : null,
+    terrain: level.fabrication?.terrain
+      ? createTerrain(level.fabrication.terrain === true ? {} : level.fabrication.terrain)
+      : null,
     terrainHistory: [],
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
     status: 'playing',

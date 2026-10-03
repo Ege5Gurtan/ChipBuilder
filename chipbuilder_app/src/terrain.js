@@ -9,14 +9,32 @@ export const MIN_HEIGHT = 0;
 export const BASE_HEIGHT = 1;
 export const MAX_HEIGHT = 3;
 
-export function createTerrain() {
-  return Array.from({ length: TERRAIN_ROWS }, (_, row) =>
-    Array.from({ length: TERRAIN_COLUMNS }, (_, col) => ({
-      height: col === 8 ? 2 : BASE_HEIGHT,
-      material: col === 8 ? 'oxide' : 'silicon',
+export function createTerrain(config = {}) {
+  const baseHeight = config.baseHeight ?? BASE_HEIGHT;
+  const baseMaterial = config.baseMaterial || 'silicon';
+  const terrain = Array.from({ length: TERRAIN_ROWS }, () =>
+    Array.from({ length: TERRAIN_COLUMNS }, () => ({
+      height: baseHeight,
+      material: baseMaterial,
       masked: false,
     }))
   );
+
+  (config.regions || []).forEach((region) => {
+    const [rowStart, rowEnd] = region.rows || [0, TERRAIN_ROWS - 1];
+    const [colStart, colEnd] = region.cols || [0, TERRAIN_COLUMNS - 1];
+    for (let row = Math.max(0, rowStart); row <= Math.min(TERRAIN_ROWS - 1, rowEnd); row += 1) {
+      for (let col = Math.max(0, colStart); col <= Math.min(TERRAIN_COLUMNS - 1, colEnd); col += 1) {
+        terrain[row][col] = {
+          ...terrain[row][col],
+          height: region.height ?? terrain[row][col].height,
+          material: region.material || terrain[row][col].material,
+        };
+      }
+    }
+  });
+
+  return terrain;
 }
 
 export function terrainCell(x, y) {

@@ -31,6 +31,9 @@ function App() {
   const keyboardNav = useRef(false);
   const sceneRef = useRef(null);
   const level = levels[levelIndex];
+  const terrainProcesses = level.fabrication?.allowedProcesses || ['lithography', 'etch', 'deposit', 'cmp'];
+  const allowLithography = Boolean(game.terrain && terrainProcesses.includes('lithography'));
+  const maskedTiles = game.terrain ? game.terrain.flat().filter((cell) => cell.masked).length : 0;
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
   const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate));
   const flashedIds = game.gateEvent?.ids || [];
@@ -174,10 +177,12 @@ function App() {
   };
 
   const paintTerrain = (col, row, newStroke) => {
+    if (!allowLithography) return;
     setGame((current) => fabricateCell(current, 'lithography', col, row, newStroke));
   };
 
   const runTerrainProcess = (action) => {
+    if (!terrainProcesses.includes(action)) return;
     setGame((current) => applyTerrainProcess(current, action, cmpHeight));
   };
 
@@ -296,6 +301,7 @@ function App() {
             onPaint={paintTerrain}
             onGateSocketClick={interactWithGateSocket}
             hoveredSocket={drag?.socket || null}
+            allowLithography={allowLithography}
           />
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
@@ -423,38 +429,49 @@ function App() {
           {game.terrain && (
             <section className="tool-section fabrication-section">
               <div className="section-heading"><span>02</span><h3>Fabrication</h3></div>
-              <p className="microcopy"><b>1 · Lithography:</b> drag on the wafer to build one active mask. Add as many brush strokes as you need before running a process.</p>
-              <div className="mask-status">
-                <span>Active mask</span>
-                <strong>{game.terrain.flat().filter((cell) => cell.masked).length} tiles</strong>
-              </div>
 
-              <p className="microcopy process-label"><b>2 · Process the mask</b></p>
-              <button
-                onClick={() => runTerrainProcess('etch')}
-                disabled={!game.terrain.some((row) => row.some((cell) => cell.masked))}
-              >
-                <span>Etch patterned tiles</span><small>{FAB_TOOLS.etch.base} + {FAB_TOOLS.etch.cell}/tile</small>
-              </button>
-              <button
-                onClick={() => runTerrainProcess('deposit')}
-                disabled={!game.terrain.some((row) => row.some((cell) => cell.masked))}
-              >
-                <span>Deposit on patterned tiles</span><small>{FAB_TOOLS.deposit.base} + {FAB_TOOLS.deposit.cell}/tile</small>
-              </button>
-              <p className="microcopy">Etch or Deposit applies to the whole yellow mask at once, then clears that mask.</p>
+              {allowLithography && (
+                <>
+                  <p className="microcopy"><b>1 · Lithography:</b> drag on the wafer to build one active mask. Add as many brush strokes as you need before running a process.</p>
+                  <div className="mask-status">
+                    <span>Active mask</span>
+                    <strong>{maskedTiles} tiles</strong>
+                  </div>
+                </>
+              )}
 
-              <label className="cmp-target">
-                <span>CMP target height</span>
-                <select value={cmpHeight} onChange={(event) => setCmpHeight(Number(event.target.value))}>
-                  <option value={0}>0</option>
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                </select>
-              </label>
-              <button onClick={() => runTerrainProcess('cmp')}>
-                <span>Run CMP globally</span><small>{FAB_TOOLS.cmp.base} + {FAB_TOOLS.cmp.cell}/changed tile</small>
-              </button>
+              {(terrainProcesses.includes('etch') || terrainProcesses.includes('deposit')) && (
+                <p className="microcopy process-label"><b>{allowLithography ? '2 · ' : ''}Process the mask</b></p>
+              )}
+              {terrainProcesses.includes('etch') && (
+                <button onClick={() => runTerrainProcess('etch')} disabled={!maskedTiles}>
+                  <span>Etch patterned tiles</span><small>{FAB_TOOLS.etch.base} + {FAB_TOOLS.etch.cell}/tile</small>
+                </button>
+              )}
+              {terrainProcesses.includes('deposit') && (
+                <button onClick={() => runTerrainProcess('deposit')} disabled={!maskedTiles}>
+                  <span>Deposit on patterned tiles</span><small>{FAB_TOOLS.deposit.base} + {FAB_TOOLS.deposit.cell}/tile</small>
+                </button>
+              )}
+              {(terrainProcesses.includes('etch') || terrainProcesses.includes('deposit')) && (
+                <p className="microcopy">Etch or Deposit applies to the whole yellow mask at once, then clears that mask.</p>
+              )}
+
+              {terrainProcesses.includes('cmp') && (
+                <>
+                  <label className="cmp-target">
+                    <span>CMP target height</span>
+                    <select value={cmpHeight} onChange={(event) => setCmpHeight(Number(event.target.value))}>
+                      <option value={0}>0</option>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                    </select>
+                  </label>
+                  <button onClick={() => runTerrainProcess('cmp')}>
+                    <span>Run CMP globally</span><small>{FAB_TOOLS.cmp.base} + {FAB_TOOLS.cmp.cell}/changed tile</small>
+                  </button>
+                </>
+              )}
 
               <button
                 className="undo-fab"

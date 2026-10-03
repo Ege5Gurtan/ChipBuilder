@@ -3,7 +3,7 @@
 ## Repository and current state
 
 - Repository: `Ege5Gurtan/ChipBuilder`.
-- The web app lives in `chipbuilder_app/`. It uses React, JavaScript, Create React App, and Three.js. `levels.js` defines four missions; `gameRules.js` owns gameplay state and terrain edit history, while `terrain.js` defines the first mission's discrete height grid and process costs. `ThreeScene.js` renders a tilted 3D wafer and handles mouse painting and WASD movement; `App.js` renders the HUD and tool controls.
+- The web app lives in `chipbuilder_app/`. It uses React, JavaScript, Create React App, and Three.js. `levels.js` defines eight data-driven missions; `gameRules.js` owns gameplay state and terrain edit history, while `terrain.js` builds per-level discrete-height terrain from region data and defines process costs. `ThreeScene.js` renders a tilted 3D wafer and handles lithography painting and WASD movement; `App.js` renders the HUD and level-specific fabrication controls.
 - Read the current repository before changing code. Keep this file aligned with the implementation as the project evolves; distinguish intended features from features that actually exist.
 
 ## Game vision
@@ -29,7 +29,7 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 ## Levels and scoring
 
 - All level buttons are directly selectable during development/playtesting; players do not need to replay earlier levels to reach a later mission.
-- Current level 01 uses a freely editable discrete-height wafer. Mouse dragging only paints a lithography mask; multiple strokes build one active pattern. Etch lowers every patterned tile by one height and Deposit raises every patterned tile by one height, then either process clears the entire mask. CMP is a separate global process that lowers all terrain above its selected target height. Height 1 is walkable, height 0 is a trench, and height 2+ is blocked terrain. Ctrl+Z or the Undo button restores the previous fabrication action, including the mask and its cost. The other three levels retain their existing gate and fixed-channel rules. All levels deliver signals via Enter at DEST.
+- Terrain levels are data-driven: each mission may define terrain regions and an `allowedProcesses` list. Mouse dragging only paints lithography when that level allows it; multiple strokes build one active pattern. Etch lowers every patterned tile by one height and Deposit raises every patterned tile by one height, then either process clears the entire mask. CMP is a separate global process that lowers all terrain above its selected target height. Height 1 is walkable, height 0 is a trench, and height 2+ is blocked terrain. Ctrl+Z or the Undo button restores the previous fabrication action, including the mask and its cost. The current eight-level progression teaches narrow etch openings, deposition bridges, multi-region masks, signal correctness, process choice, CMP, and a combined fabrication + NOT-gate puzzle.
 
 - Start with a small playable loop: move the carrier, collect bits, deposit a signal, validate it against a target, and receive clear success or failure feedback.
 - Add fabrication actions and circuit elements incrementally as the loop becomes playable. Level goals should be explicit and build on earlier mechanics.
