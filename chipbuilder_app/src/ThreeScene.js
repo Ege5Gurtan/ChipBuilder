@@ -69,7 +69,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (!socket) return null;
       const [gateId, inputId] = socket.split(':');
       if (gameRef.current.gateState[gateId]?.inputs?.[inputId] !== undefined) return null;
-      if (gameRef.current.worldBits.some((bit) => bit.sourceGateId === gateId)) return null;
+      if (gameRef.current.gateState[gateId]?.pendingOutput) return null;
       return socket;
     },
   }), []);
@@ -176,14 +176,18 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
           new THREE.MeshStandardMaterial({ color: 0x9a7a39, emissive: 0x000000, metalness: 0.35, roughness: 0.4 })
         );
         ring.rotation.x = Math.PI / 2; group.add(ring);
-        const outputLabel = label('OUT', '#ffd77d'); outputLabel.position.y = 0.52; group.add(outputLabel);
+        const outputLabel = label('OUT', '#ffd77d'); outputLabel.position.y = 0.58; group.add(outputLabel);
+        const outputZero = orb(0x72e2d4, 0.27); outputZero.position.y = 0.18; outputZero.visible = false; group.add(outputZero);
+        const outputZeroLabel = label('0'); outputZeroLabel.position.y = 0.57; outputZero.add(outputZeroLabel);
+        const outputOne = orb(0xffc87a, 0.27); outputOne.position.y = 0.18; outputOne.visible = false; group.add(outputOne);
+        const outputOneLabel = label('1'); outputOneLabel.position.y = 0.57; outputOne.add(outputOneLabel);
         const trace = new THREE.Mesh(
           new THREE.BoxGeometry(0.5, 0.07, 0.07),
           new THREE.MeshStandardMaterial({ color: 0xb08b45, metalness: 0.45, roughness: 0.4 })
         );
         trace.position.set(gate.x + width / 2 + 0.23, 0.68, -position.y); scene.add(trace);
         scene.add(group);
-        outputPorts.set(gate.id, { group, ring });
+        outputPorts.set(gate.id, { group, ring, outputZero, outputOne });
       }
     });
     const gatePulse = { mesh: null, start: 0 };
@@ -285,6 +289,14 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
           gatePulse.mesh = null;
         }
       }
+      outputPorts.forEach(({ outputZero, outputOne }) => {
+        [outputZero, outputOne].forEach((outputBit) => {
+          if (!outputBit.visible) return;
+          outputBit.rotation.y += delta * 1.8;
+          const pulseScale = 1 + 0.08 * Math.sin(clock.elapsedTime * 6);
+          outputBit.scale.setScalar(pulseScale);
+        });
+      });
       renderer.render(scene, camera);
     };
     animate();
@@ -329,9 +341,13 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       port.ring.material.emissive.setHex(hovering ? 0x5a3c00 : loaded ? 0x123b38 : 0x000000);
     });
     refs.outputPorts.forEach((port, gateId) => {
-      const ready = game.worldBits.some((bit) => bit.sourceGateId === gateId);
-      port.ring.material.color.setHex(ready ? 0xefbd55 : 0x9a7a39);
-      port.ring.material.emissive.setHex(ready ? 0x5a3c00 : 0x000000);
+      const pending = game.gateState[gateId]?.pendingOutput;
+      const ready = Boolean(pending);
+      port.outputZero.visible = pending?.value === 0;
+      port.outputOne.visible = pending?.value === 1;
+      port.ring.material.color.setHex(ready ? 0xffd16c : 0x9a7a39);
+      port.ring.material.emissive.setHex(ready ? 0x7a5100 : 0x000000);
+      port.ring.material.emissiveIntensity = ready ? 1.3 : 1;
     });
     const seq = game.feedback?.seq || 0;
     if (seq !== refs.feedbackSeq) {

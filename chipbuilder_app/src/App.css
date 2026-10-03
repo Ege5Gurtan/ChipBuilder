@@ -54,7 +54,6 @@ button { font: inherit; }
   color: var(--muted); background: transparent; cursor: pointer; font-weight: 700;
 }
 .level-nav button.active { color: var(--ink); background: var(--gold); border-color: var(--gold); }
-.level-nav button:disabled { opacity: .28; cursor: not-allowed; }
 .restart-button, .secondary-button, .primary-button {
   border: 1px solid var(--line); border-radius: 3px; color: var(--paper);
   background: transparent; padding: 10px 15px; cursor: pointer; font-weight: 700;

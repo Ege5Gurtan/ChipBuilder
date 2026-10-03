@@ -20,7 +20,6 @@ function mergeOrder(order, cargo) {
 
 function App() {
   const [levelIndex, setLevelIndex] = useState(0);
-  const [unlockedLevel, setUnlockedLevel] = useState(0);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
   const [selectedTool, setSelectedTool] = useState('lithography');
@@ -173,7 +172,6 @@ function App() {
 
   const nextLevel = () => {
     const nextIndex = Math.min(levelIndex + 1, levels.length - 1);
-    setUnlockedLevel((current) => Math.max(current, nextIndex));
     changeLevel(nextIndex);
   };
 
@@ -192,7 +190,6 @@ function App() {
             <button
               key={item.id}
               className={index === levelIndex ? 'active' : ''}
-              disabled={index > unlockedLevel}
               onClick={() => changeLevel(index)}
               aria-label={`Level ${item.number}: ${item.title}`}
             >
@@ -376,7 +373,7 @@ function App() {
                 </section>
               );
             }
-            const pendingOutput = game.worldBits.some((bit) => bit.sourceGateId === gate.id);
+            const pendingOutput = currentGate.pendingOutput;
             return (
               <section className="tool-section gate-section" key={gate.id}>
                 <div className="section-heading">
@@ -393,7 +390,7 @@ function App() {
                     );
                   })}
                   <span className={`gate-status-chip ${pendingOutput ? 'output-ready' : ''}`}>
-                    OUT: {pendingOutput ? 'bit ready' : 'empty'}
+                    OUT: {pendingOutput ? `bit ${pendingOutput.value} ready` : 'empty'}
                   </span>
                 </div>
                 <p className="microcopy">

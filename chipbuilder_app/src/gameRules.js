@@ -53,7 +53,7 @@ export function createGame(level) {
     feedback: null,
     gateEvent: null,
     gateState: Object.fromEntries(
-      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, inside: false, activations: 0 }])
+      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 }])
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain ? createTerrain() : null,
@@ -145,12 +145,36 @@ function applyPassThroughGates(level, state) {
   }, state);
 }
 
+function collectGateOutputs(level, state) {
+  return level.gates.filter((gate) => !isPassThroughGate(gate)).reduce((current, gate) => {
+    const gateState = current.gateState[gate.id];
+    const pending = gateState?.pendingOutput;
+    if (!pending) return current;
+
+    const position = gateOutputPosition(gate);
+    const distance = Math.hypot(current.player.x - position.x, current.player.y - position.y);
+    if (distance > PICKUP_RADIUS) return current;
+
+    const cargo = [...current.cargo, { id: pending.id, value: pending.value }];
+    return {
+      ...current,
+      cargo,
+      gateState: {
+        ...current.gateState,
+        [gate.id]: { ...gateState, pendingOutput: null },
+      },
+      cost: { ...current.cost, energy: current.cost.energy + 1 },
+      message: `Collected ${gate.type} output ${pending.value}. Cargo: ${cargo.map(({ value }) => value).join(' ')}.`,
+    };
+  }, state);
+}
+
 export function movePlayer(level, state, movement) {
   if (state.status !== 'playing') return state;
 
   const candidate = clampToWafer({ x: state.player.x + movement.x, y: state.player.y + movement.y });
   const player = isWalkable(level, state, candidate) ? candidate : state.player;
-  const next = applyPassThroughGates(level, collectBits({ ...state, player }));
+  const next = applyPassThroughGates(level, collectGateOutputs(level, collectBits({ ...state, player })));
   const atDestination = isAtDestination(level, next);
   if (atDestination === state.atDestination) return next;
   return {
@@ -259,7 +283,7 @@ export function depositCargo(level, state, cargoId, target) {
   const currentGate = state.gateState[gate.id];
   if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
-  if (state.worldBits.some((bit) => bit.sourceGateId === gate.id)) {
+  if (currentGate.pendingOutput) {
     return { ...state, message: `${gate.type} OUT is occupied. Collect the output bit before loading another pair.` };
   }
 
@@ -284,18 +308,18 @@ export function depositCargo(level, state, cargoId, target) {
   const output = gateOutput(gate.type, values);
   const activation = currentGate.activations + 1;
   const outputId = `${gate.id}-output-${activation}`;
-  const outputPosition = gateOutputPosition(gate);
-
   return {
     ...state,
     cargo: cargoWithoutInput,
-    worldBits: [
-      ...state.worldBits,
-      { id: outputId, value: output, ...outputPosition, armed: true, sourceGateId: gate.id },
-    ],
     gateState: {
       ...state.gateState,
-      [gate.id]: { ...currentGate, inputs: {}, output, activations: activation },
+      [gate.id]: {
+        ...currentGate,
+        inputs: {},
+        output,
+        pendingOutput: { id: outputId, value: output },
+        activations: activation,
+      },
     },
     gateEvent: {
       seq: (state.gateEvent?.seq || 0) + 1,
