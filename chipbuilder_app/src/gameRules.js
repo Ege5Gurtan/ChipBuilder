@@ -753,11 +753,6 @@ export function setPinRole(level, state, pinId, pinRole) {
   };
 }
 
-// Temporary compatibility for any in-progress UI state while the role-based controls roll out.
-export function setPinVoltage(level, state, pinId, voltage) {
-  return setPinRole(level, state, pinId, voltage === 'high' ? 'drive' : voltage === 'low' ? 'receive' : voltage);
-}
-
 function circuitDriverActive(state, port) {
   const inFlight = state.circuit.packets.some((packet) => packet.driverId === port.id);
   if (port.kind === 'source' || port.kind === 'pin') return Boolean(state.circuit.sources[port.id]) || inFlight;
@@ -962,7 +957,14 @@ export function reclaimCircuitSource(state, sourceId) {
 function depositTungsten(state) {
   const masked = state.terrain.flatMap((cells, row) => cells.flatMap((cell, col) => cell.masked ? [{ cell, col, row }] : []));
   if (!masked.length) return { ...state, message: 'Pattern any wafer tile first, then Deposit Tungsten. Only tungsten on flush copper becomes an electrical pin.' };
-  const supplied = new Set(state.circuit.prebuiltPinCells);
+  const placedGateContacts = (state.placedGates || []).flatMap((gate) => [
+    ...(gate.inputs || []).map((input) => gateInputPosition(gate, input.id)),
+    ...(gate.inputs?.length ? [gateOutputPosition(gate)] : []),
+  ]);
+  const supplied = new Set([
+    ...state.circuit.prebuiltPinCells,
+    ...placedGateContacts.map((position) => cellKey(terrainCell(position.x, position.y))),
+  ]);
   const candidates = masked.filter((tile) => !supplied.has(cellKey(tile)) && tile.cell.contact !== 'tungsten');
   if (!candidates.length) return { ...state, message: 'These locations already have contacts or supplied pads. No tungsten deposited and no process cost charged.' };
   const functional = candidates.filter(({ cell }) => cell.material === 'copper' && cell.height === BASE_HEIGHT);
