@@ -120,8 +120,8 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const tungstenMaterials = {
       functional: new THREE.MeshStandardMaterial({ color: 0xd1dbe5, metalness: 0.9, roughness: 0.24 }),
       inactive: new THREE.MeshStandardMaterial({ color: 0x9b6670, metalness: 0.65, roughness: 0.42 }),
-      drive: new THREE.MeshStandardMaterial({ color: 0xffb45f, emissive: 0x5a2600, metalness: 0.9, roughness: 0.22 }),
-      receive: new THREE.MeshStandardMaterial({ color: 0x72e2d4, emissive: 0x083c38, metalness: 0.9, roughness: 0.22 }),
+      drive: new THREE.MeshStandardMaterial({ color: 0xc6a4ff, emissive: 0x35195a, metalness: 0.9, roughness: 0.22 }),
+      receive: new THREE.MeshStandardMaterial({ color: 0xa7e89f, emissive: 0x1e4a1c, metalness: 0.9, roughness: 0.22 }),
     };
     const tungstenGeometry = new THREE.CylinderGeometry(Math.min(TILE_WIDTH, TILE_DEPTH) * 0.24, Math.min(TILE_WIDTH, TILE_DEPTH) * 0.24, 0.08, 20);
     for (let row = 0; row < TERRAIN_ROWS; row++) for (let col = 0; col < TERRAIN_COLUMNS; col++) {
