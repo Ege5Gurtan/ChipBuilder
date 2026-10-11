@@ -1,5 +1,7 @@
 import levels from './levels.js';
-import { createGame, dropCargoBit, gateInputPosition, placeSandboxGate } from './gameRules.js';
+import { advanceCircuit, applyTerrainProcess, createGame, dropCargoBit, fabricateCell, gateInputPosition, gateOutputPosition, placeSandboxGate, setPinVoltage } from './gameRules.js';
+import { cellPosition } from './circuit.js';
+import { terrainCell } from './terrain.js';
 
 const sandbox = levels.find((item) => item.sandbox);
 
@@ -39,4 +41,44 @@ test('physical drops onto sandbox AND inputs are captured and produce an output'
   expect(state.gateState[gate.id].activations).toBe(1);
   expect(state.worldBits.some((bit) => bit.id === 'and-zero')).toBe(false);
   expect(state.message).toMatch(/AND consumed A=1, B=0 and produced 0 at OUT/);
+});
+
+
+test('sandbox gate contacts align to tiles and copper delivers a bit into an input', () => {
+  let state = placeSandboxGate(sandbox, createGame(sandbox), 'AND', { x: 1, y: 0 });
+  const gate = state.placedGates[0];
+  const activeLevel = {
+    ...sandbox,
+    gates: [...(sandbox.gates || []), ...state.placedGates],
+  };
+
+  const inputA = gateInputPosition(gate, 'a');
+  const output = gateOutputPosition(gate);
+  expect(inputA).toEqual(cellPosition(terrainCell(inputA.x, inputA.y)));
+  expect(output).toEqual(cellPosition(terrainCell(output.x, output.y)));
+
+  const inputCell = terrainCell(inputA.x, inputA.y);
+  const sourceCell = { col: 2, row: inputCell.row };
+  for (let col = sourceCell.col; col <= inputCell.col; col += 1) {
+    state = fabricateCell(state, 'lithography', col, inputCell.row, col === sourceCell.col);
+  }
+  state = applyTerrainProcess(state, 'etch');
+  state = applyTerrainProcess(state, 'copper');
+
+  state = fabricateCell(state, 'lithography', sourceCell.col, sourceCell.row, true);
+  state = applyTerrainProcess(state, 'tungsten');
+  const sourceId = `pin-${sourceCell.col}-${sourceCell.row}`;
+  state = setPinVoltage(activeLevel, state, sourceId, 'high');
+
+  const sourcePosition = cellPosition(sourceCell);
+  state = {
+    ...state,
+    worldBits: [...state.worldBits, { id: 'wire-one', value: 1, ...sourcePosition, armed: true }],
+  };
+
+  for (let i = 0; i < 100; i += 1) state = advanceCircuit(activeLevel, state, 0.05);
+
+  expect(state.worldBits.some((bit) => bit.id === 'wire-one')).toBe(false);
+  expect(state.gateState[gate.id].inputs.a).toMatchObject({ value: 1 });
+  expect(state.message).toMatch(/A loaded with 1/);
 });
