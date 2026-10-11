@@ -342,8 +342,8 @@ export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
 
-  // K always drops the bit physically. If that drop lands on a simple two-port copper net,
-  // the copper accepts the bit immediately and transports it toward the valid opposite socket.
+  // K always drops the bit physically. Manual gate inputs capture a landing bit first;
+  // otherwise a simple two-port copper net can accept it and transport it toward the opposite socket.
   const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
   const spot = directions
     .map(([dx, dy]) => {
