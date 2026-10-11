@@ -180,14 +180,30 @@ test('missing SRC cannot load until tungsten creates a walkable copper contact; 
   expect(result.terrain.flat().filter((cell) => cell.contact === 'tungsten')).toHaveLength(1);
 });
 
-test('tungsten requires a copper pattern; invalid masks and existing pins charge no deposition cost', () => {
+test('tungsten can be deposited on silicon, but only flush copper creates a functional pin', () => {
   const bare = createGame(sourcePinLevel);
   expect(applyTerrainProcess(bare, 'tungsten').cost).toEqual(bare.cost);
+
   const invalid = fabricateCell(bare, 'lithography', 2, 4, true);
-  const rejected = applyTerrainProcess(invalid, 'tungsten');
-  expect(rejected.terrain).toBe(invalid.terrain);
-  expect(rejected.cost).toEqual(invalid.cost);
-  expect(rejected.message).toMatch(/need copper/);
+  const deposited = applyTerrainProcess(invalid, 'tungsten');
+  expect(deposited.terrain[4][2]).toMatchObject({
+    material: 'silicon', height: 1, contact: 'tungsten', contactFunctional: false, masked: false,
+  });
+  expect(deposited.cost).toEqual({ processSteps: 2, manufacturing: 46, energy: 0 });
+  expect(deposited.message).toMatch(/electrically inactive/);
+  expect(circuitConnections(sourcePinLevel, deposited).some((port) => port.id === 'pin-2-4')).toBe(false);
+
+  const attempted = depositCargo(sourcePinLevel, withCargo(deposited), 'test-bit', { kind: 'source', sourceId: 'pin-2-4' });
+  expect(attempted.cargo).toHaveLength(1);
+  expect(attempted.message).toMatch(/no pin yet/);
+
+  const mixed = makePins(createGame(sourcePinLevel), [[2, 5], [2, 4]]);
+  expect(mixed.terrain[5][2]).toMatchObject({ contact: 'tungsten', contactFunctional: true });
+  expect(mixed.terrain[4][2]).toMatchObject({ contact: 'tungsten', contactFunctional: false });
+  expect(mixed.cost.manufacturing).toBe(54); // 22 lithography + 32 tungsten for two deposited tiles.
+  expect(circuitConnections(sourcePinLevel, mixed).some((port) => port.id === 'pin-2-5')).toBe(true);
+  expect(circuitConnections(sourcePinLevel, mixed).some((port) => port.id === 'pin-2-4')).toBe(false);
+
   const supplied = fabricateCell(bare, 'lithography', 7, 5, true);
   expect(applyTerrainProcess(supplied, 'tungsten').cost).toEqual(supplied.cost);
   const pin = makePins(bare, [[2, 5]]);
