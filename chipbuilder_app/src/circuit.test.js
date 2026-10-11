@@ -29,12 +29,12 @@ test('source → copper → NOT → copper → DEST completes while the carrier 
   expect(result.cost.manufacturing).toBe(224);
 });
 
-test('a missing tile leaves a wire open and preserves cargo and costs', () => {
+test('a missing tile leaves a wire open and explicit source loading preserves cargo and costs', () => {
   const state = withCargo(fabricateRoute(routeCells.filter(([col]) => col !== 4)));
-  const next = dropCargoBit(level, { ...state, player: level.circuit.sources[0] }, 'test-bit');
-  expect(next.message).toMatch(/Open/);
-  expect(next.cargo).toEqual(state.cargo);
-  expect(next.cost).toEqual(state.cost);
+  const attempted = depositCargo(level, state, 'test-bit', { kind: 'source', sourceId: 'source' });
+  expect(attempted.message).toMatch(/Open/);
+  expect(attempted.cargo).toEqual(state.cargo);
+  expect(attempted.cost).toEqual(state.cost);
 });
 
 test('diagonal copper tiles are separate nets; drawing order does not give copper direction', () => {
