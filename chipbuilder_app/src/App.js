@@ -115,7 +115,7 @@ function App() {
     if (inputId === 'source') {
       if (game.circuit.sources[gateId]) setGame((current) => reclaimCircuitSource(current, gateId));
       else if (selectedId) deposit(selectedId, { kind: 'source', sourceId: gateId });
-      else setGame((current) => ({ ...current, message: 'Select a cargo bit and click a wire pin, drag it onto the pin, or press K nearby. Walk over a receiving pin to collect its bit.' }));
+      else setGame((current) => ({ ...current, message: 'Select a cargo bit and click or drag it onto the pin. You can also stand anywhere on a valid two-socket copper trace and press K to inject the bit into the wire.' }));
       return;
     }
     if (level.gates.find((gate) => gate.id === gateId)?.wired) {
@@ -284,7 +284,7 @@ function App() {
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
-              <small>Drop selected cargo bit onto wafer</small>
+              <small>Drop bit; valid copper carries it automatically</small>
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
@@ -358,7 +358,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {level.circuit && ' Send a bit by selecting it and clicking a supplied SRC or tungsten pin, or drag the bit onto that port. K always drops onto the wafer.'}
+              {level.circuit && ' K drops the bit physically. If you are on a simple copper wire connecting two sockets, the wire accepts it anywhere along the trace and carries it to the valid opposite socket. Click/drag onto a port also works.'}
               {socketGates.length > 0 && ' Drive next to A/B and press K, drag a bit onto a port, or select it and click the port.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
