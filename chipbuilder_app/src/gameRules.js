@@ -10,6 +10,13 @@ const DROP_DISTANCE = 0.45;
 // Unary gates transform carried cargo automatically when the carrier crosses them.
 const PASS_THROUGH_GATES = { NOT: (value) => (value === 0 ? 1 : 0) };
 const GATE_FOOTPRINTS = { NOT: { width: 1.75, height: 1.35 }, AND: { width: 2.15, height: 1.35 }, OR: { width: 2.15, height: 1.35 } };
+export const DEFAULT_GATE_PROPAGATION_DELAYS = { NOT: 0.8, AND: 1, OR: 1 };
+
+export function gatePropagationDelay(gate) {
+  const configured = Number(gate?.propagationDelay);
+  if (Number.isFinite(configured) && configured >= 0) return configured;
+  return DEFAULT_GATE_PROPAGATION_DELAYS[gate?.type] ?? 0.8;
+}
 
 export const SANDBOX_GATE_TYPES = ['NOT', 'AND', 'OR'];
 
@@ -110,7 +117,7 @@ export function placeSandboxGate(level, state, type, position) {
     nextGateId: sequence + 1,
     gateState: {
       ...state.gateState,
-      [gate.id]: { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 },
+      [gate.id]: { inputs: {}, output: null, pendingOutput: null, processing: null, inside: false, activations: 0 },
     },
     message: `${type} gate placed. Load ${gate.inputs.map((input) => input.label).join(' and ')} from cargo, then collect the result at OUT.`,
   };
@@ -135,7 +142,7 @@ export function createGame(level) {
     placedGates: [],
     nextGateId: 1,
     gateState: Object.fromEntries(
-      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 }])
+      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, processing: null, inside: false, activations: 0 }])
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain
@@ -344,7 +351,7 @@ function droppedGateInputTarget(level, state, position) {
   const candidates = (level.gates || []).flatMap((gate) => {
     if (gate.wired || isPassThroughGate(gate) || !gate.inputs?.length) return [];
     const currentGate = state.gateState[gate.id];
-    if (!currentGate || currentGate.pendingOutput) return [];
+    if (!currentGate || currentGate.pendingOutput || currentGate.processing) return [];
 
     return gate.inputs
       .filter((input) => currentGate.inputs[input.id] === undefined)
@@ -428,8 +435,10 @@ export function depositCargo(level, state, cargoId, target) {
   const currentGate = state.gateState[gate.id];
   if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
-  if (currentGate.pendingOutput) {
-    return { ...state, message: gate.wired ? `${gate.type} OUT is occupied. Collect the waiting bit or complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another input.` };
+  if (currentGate.pendingOutput || currentGate.processing) {
+    return { ...state, message: currentGate.processing
+      ? `${gate.type} is still processing its previous input. Wait for the propagation delay to finish.`
+      : gate.wired ? `${gate.type} OUT is occupied. Collect the waiting bit or complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another input.` };
   }
 
   const inputs = { ...currentGate.inputs, [input.id]: { id: cargo.id, value: cargo.value } };
@@ -453,6 +462,7 @@ export function depositCargo(level, state, cargoId, target) {
   const output = gateOutput(gate.type, values);
   const activation = currentGate.activations + 1;
   const outputId = `${gate.id}-output-${activation}`;
+  const duration = gatePropagationDelay(gate);
   return {
     ...state,
     cargo: cargoWithoutInput,
@@ -461,19 +471,18 @@ export function depositCargo(level, state, cargoId, target) {
       [gate.id]: {
         ...currentGate,
         inputs: {},
-        output,
-        pendingOutput: { id: outputId, value: output },
+        processing: {
+          id: outputId,
+          value: output,
+          duration,
+          remaining: duration,
+          inputValues: values,
+        },
         activations: activation,
       },
     },
-    gateEvent: {
-      seq: (state.gateEvent?.seq || 0) + 1,
-      gateId: gate.id,
-      gateType: gate.type,
-      ids: [outputId],
-    },
     cost: { ...state.cost, energy: state.cost.energy + 2 },
-    message: `${gate.type} consumed ${gate.inputs.map((item) => `${item.label}=${inputs[item.id].value}`).join(', ')} and produced ${output} at OUT. ${gate.wired ? 'Walk over OUT to collect it, or complete a copper route for automatic forwarding.' : 'Walk over the output bit to collect it.'}`,
+    message: `${gate.type} consumed ${gate.inputs.map((item) => `${item.label}=${inputs[item.id].value}`).join(', ')} and is processing for ${duration.toFixed(2)} s before OUT is ready.`,
   };
 }
 
@@ -783,6 +792,55 @@ function circuitDriverActive(state, port) {
   return false;
 }
 
+function ringOscillatorNetMap(level, nets) {
+  if (!level.sandbox) return new Map();
+  const gateById = new Map(level.gates.map((gate) => [gate.id, gate]));
+  const edges = [];
+  nets.forEach((net, netIndex) => {
+    const outputs = net.drivers.filter((port) => port.kind === 'gateOutput');
+    const inputs = net.receivers.filter((port) => port.kind === 'gate');
+    if (outputs.length !== 1 || inputs.length !== 1 || net.ports.length !== 2) return;
+    edges.push({ from: outputs[0].gateId, to: inputs[0].gateId, netIndex });
+  });
+
+  const outgoing = new Map();
+  const incoming = new Map();
+  edges.forEach((edge) => {
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) || []), edge]);
+    incoming.set(edge.to, [...(incoming.get(edge.to) || []), edge]);
+  });
+
+  const ringNets = new Map();
+  gateById.forEach((gate, startId) => {
+    const path = [];
+    const seen = new Set();
+    let current = startId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const nextEdges = outgoing.get(current) || [];
+      if (nextEdges.length !== 1) return;
+      const edge = nextEdges[0];
+      path.push(edge);
+      current = edge.to;
+      if (current === startId) break;
+    }
+    if (current !== startId || path.length < 3 || path.length % 2 === 0) return;
+    const gateIds = path.map((edge) => edge.from);
+    if (new Set(gateIds).size !== path.length) return;
+    const valid = gateIds.every((gateId) => {
+      const member = gateById.get(gateId);
+      return member?.type === 'NOT'
+        && member.inputs?.length === 1
+        && (outgoing.get(gateId) || []).length === 1
+        && (incoming.get(gateId) || []).length === 1;
+    });
+    if (!valid) return;
+    const id = `ring:${[...gateIds].sort().join('|')}`;
+    path.forEach((edge) => ringNets.set(edge.netIndex, { id, stages: path.length, gateIds }));
+  });
+  return ringNets;
+}
+
 function circuitNets(level, state) {
   const nets = wireNets(state.terrain, circuitPorts(level, state));
   const edges = new Map();
@@ -795,25 +853,28 @@ function circuitNets(level, state) {
     if (from === target) return true;
     if (seen.has(from)) return false;
     seen.add(from);
-    return (edges.get(from) || []).some((gateId) => reaches(gateId, target, seen));
+    return (edges.get(from) || []).some((gateId) => reaches(gateId, target, new Set(seen)));
   };
-  return nets.map((net) => {
+  const ringNets = ringOscillatorNetMap(level, nets);
+  return nets.map((net, index) => {
     const fixedDrivers = net.drivers.filter((port) => port.kind !== 'pin');
     const activeDrivers = net.ports.filter((port) => circuitDriverActive(state, port));
     const fixedConflict = fixedDrivers.length > 1;
+    const cycle = net.drivers.some((driver) => driver.kind === 'gateOutput'
+      && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, driver.gateId)));
     return {
       ...net,
       activeDrivers,
       fixedConflict,
       conflict: fixedConflict || activeDrivers.length > 1,
-      cycle: net.drivers.some((driver) => driver.kind === 'gateOutput'
-        && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, driver.gateId))),
+      cycle,
+      ringOscillator: cycle ? ringNets.get(index) || null : null,
     };
   });
 }
 
 function wireDropEndpoints(net, state, position) {
-  if (net.ports.length !== 2 || net.conflict || net.cycle || net.activeDrivers.length) return null;
+  if (net.ports.length !== 2 || net.conflict || (net.cycle && !net.ringOscillator) || net.activeDrivers.length) return null;
   const [a, b] = net.ports;
   const sourceOnly = (port) => ['source', 'gateOutput'].includes(port.kind);
   const receiverOnly = (port) => ['gate', 'destination'].includes(port.kind);
@@ -940,7 +1001,7 @@ export function circuitConnections(level, state) {
     const activeOtherDrivers = (net?.activeDrivers || []).filter((driver) => driver.id !== port.id);
     const receiving = port.kind === 'pin' && port.role === 'receiver' && activeOtherDrivers.length === 1;
     const receivers = (net?.receivers || []).filter((receiver) => receiver.id !== port.id);
-    const ready = Boolean(net && !net.conflict && !net.cycle && (receiving || receivers.length));
+    const ready = Boolean(net && !net.conflict && (!net.cycle || net.ringOscillator) && (receiving || receivers.length));
     const busy = Boolean(state.circuit.sources[port.id] || state.circuit.pinOutputs[port.id]
       || state.circuit.packets.some((packet) => packet.driverId === port.id || packet.receiver.id === port.id));
     return {
@@ -950,7 +1011,8 @@ export function circuitConnections(level, state) {
         : !net ? 'Open: copper has not reached this pad.'
         : net.fixedConflict ? 'Short: multiple built-in output drivers share this copper. Separate the traces.'
           : net.conflict ? 'Short: more than one active driver is sending onto this copper. Wait, reclaim a bit, or separate the traces.'
-            : net.cycle ? 'Feedback loop: route the output forward to another component or DEST.'
+            : net.cycle && !net.ringOscillator ? 'Feedback loop: this topology is not a supported digital ring oscillator.'
+            : net.ringOscillator ? `Ring oscillator: ${net.ringOscillator.stages} NOT stages form a valid odd-inverter loop. Seed one gate input to start oscillation.`
             : receiving ? `Receives from ${activeOtherDrivers[0].label}. Walk over this pin to collect a waiting bit.`
               : !receivers.length ? 'Open: this trace does not reach another receiving pin or input.'
                 : `Connected to ${receivers.map((receiver) => receiver.label).join(', ')}.`,
@@ -1054,7 +1116,7 @@ function receiverAvailable(state, port) {
   if (port.kind === 'destination') return state.targetSlots.some((slot) => !slot.delivered);
   if (port.kind === 'pin') return !state.circuit.pinOutputs[port.id];
   const gate = state.gateState[port.gateId];
-  return Boolean(gate && !gate.pendingOutput && !gate.inputs[port.inputId]);
+  return Boolean(gate && !gate.pendingOutput && !gate.processing && !gate.inputs[port.inputId]);
 }
 
 function receiveCircuitBit(level, state, packet) {
@@ -1090,10 +1152,52 @@ function receiveCircuitBit(level, state, packet) {
   };
 }
 
+function advanceGateProcessing(level, state, delta) {
+  let next = state;
+  level.gates.forEach((gate) => {
+    const currentGate = next.gateState[gate.id];
+    const processing = currentGate?.processing;
+    if (!processing) return;
+    const remaining = Math.max(0, processing.remaining - delta);
+    if (remaining > 0) {
+      next = {
+        ...next,
+        gateState: {
+          ...next.gateState,
+          [gate.id]: { ...currentGate, processing: { ...processing, remaining } },
+        },
+      };
+      return;
+    }
+    const pendingOutput = { id: processing.id, value: processing.value };
+    next = {
+      ...next,
+      gateState: {
+        ...next.gateState,
+        [gate.id]: {
+          ...currentGate,
+          output: processing.value,
+          pendingOutput,
+          processing: null,
+        },
+      },
+      gateEvent: {
+        seq: (next.gateEvent?.seq || 0) + 1,
+        gateId: gate.id,
+        gateType: gate.type,
+        ids: [processing.id],
+      },
+      message: `${gate.type} propagation delay complete: ${processing.value} is ready at OUT.`,
+    };
+  });
+  return next;
+}
+
 // Called independently of carrier movement. State owns transport; Three.js only draws packets.
 export function advanceCircuit(level, state, delta) {
   if ((!level.circuit && !level.sandbox) || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
   let energized = level.sandbox ? energizeSandboxWorldBits(level, state) : state;
+  energized = advanceGateProcessing(level, energized, delta);
   const pendingDriver = Object.values(energized.circuit.sources).some(Boolean)
     || level.gates.some((gate) => (gate.wired || level.sandbox) && energized.gateState[gate.id]?.pendingOutput);
   if (!energized.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, energized);
@@ -1107,7 +1211,7 @@ export function advanceCircuit(level, state, delta) {
 
   const nets = circuitNets(level, next);
   nets.forEach((net) => {
-    if (net.conflict || net.cycle || net.activeDrivers.length !== 1 || !net.receivers.length) return;
+    if (net.conflict || (net.cycle && !net.ringOscillator) || net.activeDrivers.length !== 1 || !net.receivers.length) return;
     const driver = net.activeDrivers[0];
     const bit = ['source', 'pin'].includes(driver.kind) ? next.circuit.sources[driver.id] : next.gateState[driver.gateId].pendingOutput;
     if (!bit || !net.receivers.every((receiver) => receiverAvailable(next, receiver))) return;
