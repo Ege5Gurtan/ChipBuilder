@@ -141,9 +141,9 @@ const levels = [
   {
     id: 'copper-not-route',
     number: '09',
-    title: 'Build the Driver Contact',
-    goal: 'Turn the supplied copper tile into a tungsten Drive contact, send the 0 into NOT, then carry OUT = 1 to DEST.',
-    lesson: 'The copper tile beside NOT IN is already supplied. Pattern that tile, Deposit Tungsten, click the new contact and set it to Drive. Load the 0, wait for NOT to finish, collect the 1 at OUT, and carry it to DEST.',
+    title: 'Add a Contact to the Wire',
+    goal: 'Place a tungsten contact somewhere on the supplied copper wire, set it to Drive, send the 0 into NOT, then carry OUT = 1 to DEST.',
+    lesson: 'A longer copper wire is already connected to NOT IN. Choose any tile on that wire, pattern it, Deposit Tungsten, click the new contact and set it to Drive. Load the 0, wait for NOT to finish, collect the 1 at OUT, and carry it to DEST.',
     target: '1',
     start: { x: -5.2, y: -2.8 },
     destination: { x: 4.333, y: -0.375 },
@@ -153,10 +153,9 @@ const levels = [
     circuit: {
       sources: [],
       manualPinRoles: true,
-      pinHints: [{ x: -1.667, y: -0.375, label: 'DRIVE' }],
     },
     fabrication: {
-      terrain: { regions: [{ rows: [5, 5], cols: [6, 6], material: 'copper' }] },
+      terrain: { regions: [{ rows: [5, 5], cols: [2, 6], material: 'copper' }] },
       allowedProcesses: ['lithography', 'tungsten'],
     },
   },
@@ -176,7 +175,6 @@ const levels = [
       sources: [],
       manualPinRoles: true,
       initialPinRoles: { 'pin-2-5': 'drive' },
-      pinHints: [{ x: -4.333, y: -0.375, label: 'DRIVE' }],
     },
     fabrication: {
       terrain: {

@@ -572,7 +572,9 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       port.group.traverse((object) => { object.geometry?.dispose(); object.material?.map?.dispose(); object.material?.dispose(); });
       refs.sourcePorts.delete(id);
     });
-    if (!level.sandbox) pins.forEach((pin) => { if (!refs.sourcePorts.has(pin.id)) refs.addSourcePort(pin); });
+    if (!level.sandbox && !usesManualPinRoles(level)) {
+      pins.forEach((pin) => { if (!refs.sourcePorts.has(pin.id)) refs.addSourcePort(pin); });
+    }
     refs.pinHints.forEach((hint) => {
       const cell = terrainCell(hint.x, hint.y);
       hint.group.visible = !pins.some((pin) => pin.col === cell.col && pin.row === cell.row);

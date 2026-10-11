@@ -76,13 +76,13 @@ Nine numbered missions plus the Process Sandbox teach carrier movement, signal d
 
 Level 08 uses the same explicit gate rule as newer logic gates: NOT has a physical IN contact, a physical OUT contact, and a propagation delay. Load the 0 into IN, watch the progress bar fill, then collect the inverted 1 from OUT. Walking through this NOT gate does not flip cargo.
 
-## Level 09: Build the Driver Contact
+## Level 09: Add a Contact to the Wire
 
-Level 09 no longer has SRC. A single copper tile is supplied beside NOT IN. Pattern that tile, **Deposit Tungsten**, click the resulting contact, and set its role to **Drive**. Send the collected 0 from the Drive contact into NOT, wait for the propagation delay, collect 1 at OUT, and carry it to DEST.
+Level 09 no longer has SRC. A longer copper wire is already connected to NOT IN and extends away from the gate. The player chooses any tile on that wire, patterns it, **Deposits Tungsten**, and sets the new contact to **Drive**. There is no DRIVE marker or placeholder ring on the wafer. Send the collected 0 from the new contact into NOT, wait for the propagation delay, collect 1 at OUT, and carry it to DEST.
 
 ## Level 10: Connect the Driver
 
-Level 10 also has no SRC. It starts with a functional tungsten Drive contact already sitting on one copper tile. Fabricate a copper trace from the tile next to that contact to the NOT input using lithography, etch, and copper fill. The supplied tungsten contact stays intact while the player builds the connection. Send 0 through the completed trace, then collect the resulting 1 at OUT and carry it to DEST.
+Level 10 also has no SRC. It starts with a normal functional tungsten contact sitting directly on one copper tile, with its role pre-set to Drive. It has no DRIVE map label and no gray placeholder/source ring. There is deliberately no copper connection from that contact to NOT IN; the player must fabricate that copper trench/trace using lithography, etch, and copper fill. Send 0 through the completed trace, then collect the resulting 1 at OUT and carry it to DEST.
 
 Copper is passive and joins only across shared tile edges. Explicit Drive/Receive roles define direction for mission contacts that use manual pin roles. Gate inputs are receivers and gate outputs are drivers. Gate processing, wire packets, signal state, and win conditions live in gameplay state rather than the renderer.
 

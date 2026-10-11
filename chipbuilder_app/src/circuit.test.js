@@ -264,19 +264,24 @@ function makePins(state, cells) {
   return applyTerrainProcess(state, 'tungsten');
 }
 
-test('level 09 replaces SRC with a copper tile that must become a tungsten Drive contact', () => {
+test('level 09 supplies a longer copper wire and lets the player add a tungsten Drive contact anywhere on it', () => {
   const mission = levels.find((item) => item.id === 'copper-not-route');
   let state = withCargo(createGame(mission));
   expect(mission.circuit.sources).toEqual([]);
-  expect(state.terrain[5][6]).toMatchObject({ material: 'copper', height: 1 });
-  state = fabricateCell(state, 'lithography', 6, 5, true);
+  expect(mission.circuit.pinHints).toBeUndefined();
+  [2, 3, 4, 5, 6].forEach((col) => {
+    expect(state.terrain[5][col]).toMatchObject({ material: 'copper', height: 1 });
+  });
+
+  // Put the contact in the middle of the supplied wire, not beside the gate.
+  state = fabricateCell(state, 'lithography', 4, 5, true);
   state = applyTerrainProcess(state, 'tungsten');
-  expect(state.terrain[5][6]).toMatchObject({ contact: 'tungsten', contactFunctional: true });
-  const blocked = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-6-5' });
+  expect(state.terrain[5][4]).toMatchObject({ contact: 'tungsten', contactFunctional: true });
+  const blocked = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-4-5' });
   expect(blocked.cargo).toHaveLength(1);
   expect(blocked.message).toMatch(/Drive/);
-  state = setPinRole(mission, state, 'pin-6-5', 'drive');
-  state = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-6-5' });
+  state = setPinRole(mission, state, 'pin-4-5', 'drive');
+  state = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-4-5' });
   state = run(state, mission);
   expect(state.gateState['wired-not'].activations).toBe(1);
   expect(state.gateState['wired-not'].pendingOutput.value).toBe(1);
@@ -286,6 +291,7 @@ test('level 10 starts with a tungsten Drive contact and requires copper to reach
   const mission = levels.find((item) => item.id === 'build-source-pin');
   let state = withCargo(createGame(mission));
   expect(mission.circuit.sources).toEqual([]);
+  expect(mission.circuit.pinHints).toBeUndefined();
   expect(state.terrain[5][2]).toMatchObject({
     material: 'copper', height: 1, contact: 'tungsten', contactFunctional: true,
   });
