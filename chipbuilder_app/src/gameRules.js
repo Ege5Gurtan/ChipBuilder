@@ -316,6 +316,28 @@ export function attemptSignalDelivery(level, state) {
   };
 }
 
+function droppedGateInputTarget(level, state, position) {
+  const candidates = (level.gates || []).flatMap((gate) => {
+    if (gate.wired || isPassThroughGate(gate) || !gate.inputs?.length) return [];
+    const currentGate = state.gateState[gate.id];
+    if (!currentGate || currentGate.pendingOutput) return [];
+
+    return gate.inputs
+      .filter((input) => currentGate.inputs[input.id] === undefined)
+      .map((input) => {
+        const socket = gateInputPosition(gate, input.id);
+        return {
+          distance: Math.hypot(position.x - socket.x, position.y - socket.y),
+          target: { kind: 'gate', gateId: gate.id, inputId: input.id },
+        };
+      });
+  });
+
+  return candidates
+    .filter((candidate) => candidate.distance <= PICKUP_RADIUS)
+    .sort((a, b) => a.distance - b.distance)[0]?.target || null;
+}
+
 export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
@@ -329,6 +351,9 @@ export function dropCargoBit(level, state, cargoId) {
       return clampToWafer({ x: state.player.x + dx / length * DROP_DISTANCE, y: state.player.y + dy / length * DROP_DISTANCE });
     })
     .find((position) => isWalkable(level, state, position)) || { ...state.player };
+
+  const gateTarget = droppedGateInputTarget(level, state, spot);
+  if (gateTarget) return depositCargo(level, state, item.id, gateTarget);
 
   const playerCell = terrainCell(state.player.x, state.player.y);
   const spotCell = terrainCell(spot.x, spot.y);
