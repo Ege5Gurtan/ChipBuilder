@@ -35,7 +35,7 @@ export function editable(target) {
   return target?.isContentEditable || ['input', 'textarea', 'select'].includes(tag);
 }
 
-const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onTick, onPaint, onGateSocketClick, onContactClick, hoveredSocket, interactingCargo = false, allowLithography = true }, ref) {
+const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, onTick, onPaint, onGateSocketClick, onContactClick, hoveredSocket, interactingCargo = false, allowLithography = true, placementGateType = null, gatePlacement = null, onGatePlacementHover, onGatePlacementConfirm, onGatePlacementCancel }, ref) {
   const mountRef = useRef(null);
   const moveRef = useRef(onMove);
   const tickRef = useRef(onTick);
@@ -44,6 +44,10 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
   const gateSocketClickRef = useRef(onGateSocketClick);
   const contactClickRef = useRef(onContactClick);
   const allowLithographyRef = useRef(allowLithography);
+  const placementGateTypeRef = useRef(placementGateType);
+  const placementHoverRef = useRef(onGatePlacementHover);
+  const placementConfirmRef = useRef(onGatePlacementConfirm);
+  const placementCancelRef = useRef(onGatePlacementCancel);
   const gameRef = useRef(game);
   const visuals = useRef(null);
   useEffect(() => {
@@ -54,6 +58,10 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     gateSocketClickRef.current = onGateSocketClick;
     contactClickRef.current = onContactClick;
     allowLithographyRef.current = allowLithography;
+    placementGateTypeRef.current = placementGateType;
+    placementHoverRef.current = onGatePlacementHover;
+    placementConfirmRef.current = onGatePlacementConfirm;
+    placementCancelRef.current = onGatePlacementCancel;
     gameRef.current = game;
   });
 
@@ -263,7 +271,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     }
     const gatePulse = { mesh: null, start: 0 };
     visuals.current = {
-      renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, tungstenMaterials, pulse,
+      scene, renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, tungstenMaterials, pulse,
       gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts, addSourcePort, pinHints,
       clock: null, feedbackSeq: 0, gateSeq: 0,
     };
@@ -295,8 +303,23 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       paintRef.current(col, row, !strokeStarted);
       if (valid) strokeStarted = true;
     };
+    const pointOnWafer = (event) => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(tileMeshes, false)[0];
+      return hit ? { x: hit.point.x, y: -hit.point.z } : null;
+    };
     const down = (event) => {
       strokeStarted = false;
+      if (placementGateTypeRef.current) {
+        if (event.button === 0) {
+          event.preventDefault();
+          const point = pointOnWafer(event);
+          if (point) placementConfirmRef.current?.(point);
+        }
+        return;
+      }
       if (!allowLithographyRef.current || !gameRef.current.terrain || event.button !== 0) return;
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
@@ -317,10 +340,24 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       painting = true; strokeStarted = false; touched.clear();
       renderer.domElement.setPointerCapture(event.pointerId); paint(event);
     };
-    const move = (event) => { if (painting) paint(event); };
+    const move = (event) => {
+      if (placementGateTypeRef.current) {
+        placementHoverRef.current?.(pointOnWafer(event));
+        return;
+      }
+      if (painting) paint(event);
+    };
+    const leave = () => {
+      if (placementGateTypeRef.current) placementHoverRef.current?.(null);
+    };
     const up = () => { painting = false; touched.clear(); };
+    const contextMenu = (event) => {
+      if (!placementGateTypeRef.current) return;
+      event.preventDefault();
+      placementCancelRef.current?.();
+    };
     const gateClick = (event) => {
-      if (event.button !== 0 || strokeStarted) return;
+      if (placementGateTypeRef.current || event.button !== 0 || strokeStarted) return;
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
@@ -348,6 +385,8 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     renderer.domElement.addEventListener('pointermove', move);
     renderer.domElement.addEventListener('pointerup', up);
     renderer.domElement.addEventListener('pointercancel', up);
+    renderer.domElement.addEventListener('pointerleave', leave);
+    renderer.domElement.addEventListener('contextmenu', contextMenu);
     renderer.domElement.addEventListener('click', gateClick);
 
     const resize = () => {
@@ -401,6 +440,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); window.removeEventListener('blur', clearKeys);
       renderer.domElement.removeEventListener('pointerdown', down); renderer.domElement.removeEventListener('pointermove', move);
       renderer.domElement.removeEventListener('pointerup', up); renderer.domElement.removeEventListener('pointercancel', up);
+      renderer.domElement.removeEventListener('pointerleave', leave); renderer.domElement.removeEventListener('contextmenu', contextMenu);
       renderer.domElement.removeEventListener('click', gateClick);
       visuals.current = null;
       const geometries = new Set(), ownedMaterials = new Set();
@@ -415,6 +455,68 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove();
     };
   }, [level]);
+
+  useEffect(() => {
+    const refs = visuals.current;
+    if (!refs) return undefined;
+
+    const disposePreview = () => {
+      const current = refs.gatePreviewGroup;
+      if (!current) return;
+      current.removeFromParent();
+      current.traverse((object) => {
+        object.geometry?.dispose();
+        object.material?.map?.dispose();
+        object.material?.dispose();
+      });
+      refs.gatePreviewGroup = null;
+    };
+
+    disposePreview();
+    const previewGate = gatePlacement?.gate;
+    if (!previewGate) return undefined;
+
+    const valid = Boolean(gatePlacement.valid);
+    const color = valid ? 0x63d9d0 : 0xf07162;
+    const group = new THREE.Group();
+    const ghostMaterial = () => new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.38, depthWrite: false,
+    });
+    const { width, height } = gateFootprint(previewGate);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(width, 0.55, height), ghostMaterial());
+    body.position.set(previewGate.x, 0.54, -previewGate.y);
+    group.add(body);
+
+    const text = label(previewGate.type, valid ? '#aef5ee' : '#ffc2ba');
+    text.position.set(previewGate.x, 1.12, -previewGate.y);
+    text.material.opacity = 0.72;
+    group.add(text);
+
+    previewGate.inputs?.forEach((input) => {
+      const position = gateInputPosition(previewGate, input.id);
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(TILE_WIDTH * 0.92, 0.08, TILE_DEPTH * 0.92),
+        ghostMaterial()
+      );
+      pad.position.set(position.x, 0.63, -position.y);
+      group.add(pad);
+    });
+    if (previewGate.inputs?.length) {
+      const position = gateOutputPosition(previewGate);
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(TILE_WIDTH * 0.92, 0.08, TILE_DEPTH * 0.92),
+        ghostMaterial()
+      );
+      pad.position.set(position.x, 0.63, -position.y);
+      group.add(pad);
+    }
+
+    refs.scene.add(group);
+    refs.gatePreviewGroup = group;
+    return () => {
+      if (refs.gatePreviewGroup === group) disposePreview();
+    };
+  }, [gatePlacement]);
 
   useEffect(() => {
     const refs = visuals.current;
