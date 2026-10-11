@@ -90,6 +90,51 @@ test('sandbox gate contacts use fixed roles and Drive can carry a 0 into an inpu
 });
 
 
+test('K drop beside a sandbox Drive contact injects onto copper and reaches the gate input', () => {
+  let state = placeSandboxGate(sandbox, createGame(sandbox), 'AND', { x: 1, y: 0 });
+  const gate = state.placedGates[0];
+  const activeLevel = {
+    ...sandbox,
+    gates: [...(sandbox.gates || []), ...state.placedGates],
+  };
+
+  const inputA = gateInputPosition(gate, 'a');
+  const inputCell = terrainCell(inputA.x, inputA.y);
+  const sourceCell = { col: 2, row: inputCell.row };
+  for (let col = sourceCell.col; col <= inputCell.col; col += 1) {
+    state = fabricateCell(state, 'lithography', col, inputCell.row, col === sourceCell.col);
+  }
+  state = applyTerrainProcess(state, 'etch');
+  state = applyTerrainProcess(state, 'copper');
+  state = fabricateCell(state, 'lithography', sourceCell.col, sourceCell.row, true);
+  state = applyTerrainProcess(state, 'tungsten');
+
+  const sourceId = `pin-${sourceCell.col}-${sourceCell.row}`;
+  state = setPinRole(activeLevel, state, sourceId, 'drive');
+  const adjacentCell = { col: sourceCell.col, row: sourceCell.row + 1 };
+  const adjacentPosition = cellPosition(adjacentCell);
+  expect(state.terrain[adjacentCell.row][adjacentCell.col].material).not.toBe('copper');
+
+  state = {
+    ...state,
+    player: adjacentPosition,
+    cargo: [{ id: 'drop-zero', value: 0 }],
+  };
+  state = dropCargoBit(activeLevel, state, 'drop-zero');
+
+  expect(state.cargo).toHaveLength(0);
+  expect(state.worldBits.some((bit) => bit.id === 'drop-zero')).toBe(false);
+  expect(state.circuit.packets).toHaveLength(1);
+  expect(state.circuit.packets[0].driverId).toBe(sourceId);
+
+  for (let i = 0; i < 100; i += 1) state = advanceCircuit(activeLevel, state, 0.05);
+
+  expect(state.circuit.packets).toHaveLength(0);
+  expect(state.gateState[gate.id].inputs.a).toMatchObject({ value: 0 });
+  expect(state.message).toMatch(/A loaded with 0/);
+});
+
+
 test('sandbox gate contacts are prefabricated and skip tungsten deposition', () => {
   let state = placeSandboxGate(sandbox, createGame(sandbox), 'AND', { x: 1, y: 0 });
   const gate = state.placedGates[0];
