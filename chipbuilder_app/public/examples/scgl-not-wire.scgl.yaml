@@ -1,0 +1,96 @@
+# SemiConGame Level Language (SCGL) v1 example.
+# One file contains the semantic initial state of the complete level.
+format: semicon-game-level
+version: 1
+
+level:
+  id: scgl-not-wire-example
+  title: SCGL NOT Wire Example
+  author: SemiConGame
+  goal: Send a 0 from the tungsten Drive contact through copper into NOT, collect OUT = 1, and deliver signal 1.
+  lesson: This example shows terrain, copper, a contact role, a logic device, bits, the carrier, fabrication permissions, and the mission in one file.
+
+world:
+  grid:
+    columns: 18
+    rows: 12
+  substrate:
+    material: silicon
+    height: 1
+  structures:
+    - id: copper-input-wire
+      material: copper
+      height: 1
+      area:
+        path:
+          from: { col: 3, row: 5 }
+          to: { col: 7, row: 5 }
+    - id: oxide-practice-block
+      material: oxide
+      height: 2
+      area:
+        rect:
+          cols: [12, 13]
+          rows: [8, 9]
+
+contacts:
+  - id: input-driver
+    type: tungsten
+    at:
+      cell: { col: 3, row: 5 }
+    role: drive
+
+devices:
+  - id: inverter-1
+    type: logic_gate
+    model: NOT
+    at:
+      cell: { col: 9, row: 5 }
+    orientation: east
+    propagation_delay: 0.8s
+    ports:
+      in: { role: input, label: IN }
+      out: { role: output, label: OUT }
+
+objects:
+  - id: input-zero
+    type: bit
+    value: 0
+    at:
+      cell: { col: 2, row: 8 }
+  - id: spare-one
+    type: bit
+    value: 1
+    at:
+      cell: { col: 4, row: 9 }
+
+actors:
+  - id: player
+    type: carrier
+    controller: player
+    species: electron
+    spawn:
+      cell: { col: 1, row: 9 }
+
+destination:
+  id: dest
+  at:
+    cell: { col: 16, row: 5 }
+
+fabrication:
+  allowed_processes:
+    - lithography
+    - etch
+    - deposit
+    - { process: deposit, material: copper }
+    - { process: deposit, material: tungsten }
+    - cmp
+
+mission:
+  objective:
+    type: deliver_signal
+    destination: dest
+    signal: [1]
+
+scoring:
+  track: [process_steps, manufacturing, energy]

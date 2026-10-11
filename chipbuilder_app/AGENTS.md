@@ -58,3 +58,12 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 - Prefer small changes that yield a complete playable slice. Do not build Joe, multiplayer, or a detailed fabrication simulator before the core single-player signal loop works.
 - For each implementation change, run the relevant build and directly check the affected gameplay interaction when possible. Do not add superficial tests that only repeat implementation details.
 - Update this `AGENTS.md` when core controls, game rules, data structures, or major architecture decisions change. Keep it concise and factual, not a changelog.
+
+
+## SCGL level files
+
+- The Process Sandbox can import and export one self-contained semantic YAML level file using SCGL v1 (`.scgl.yaml`). SCGL describes initial terrain/material state, contacts and roles, logic devices, bits/cargo, the carrier spawn, destination, allowed fabrication processes, mission signal, and scoring metadata; it does not serialize Three.js meshes.
+- `src/scgl.js` parses, validates, compiles, and exports SCGL. Keep SCGL semantic and versioned so future ions, transistors, LEDs, photonic devices, and fabrication processes can extend device/object/process vocabularies without replacing the one-file model.
+- Sandbox export intentionally excludes transient simulation state such as packets in flight, loaded/processing gates, and pending outputs. Export must fail clearly while such state exists rather than silently losing a finite bit.
+- Imported SCGL is compiled into the existing level/game structures; terrain, circuit, gameplay rules, and rendering remain separate systems. Unsupported SCGL v1 device/process types must report a validation error rather than being ignored.
+- The example file is `public/examples/scgl-not-wire.scgl.yaml`.

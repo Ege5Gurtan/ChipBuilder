@@ -3,6 +3,7 @@ import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
 import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, sandboxGatePlacement, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit, usesManualPinRoles } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
+import { exportSandboxSCGL, parseSCGL, scglDownloadName } from './scgl.js';
 import './App.css';
 
 const DRAG_THRESHOLD = 4;
@@ -25,6 +26,7 @@ function mergeOrder(order, cargo) {
 
 function App() {
   const [levelIndex, setLevelIndex] = useState(0);
+  const [sandboxLevel, setSandboxLevel] = useState(null);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
   const [selectedContactPinId, setSelectedContactPinId] = useState(null);
@@ -38,7 +40,9 @@ function App() {
   const itemRefs = useRef(new Map());
   const keyboardNav = useRef(false);
   const sceneRef = useRef(null);
-  const level = levels[levelIndex];
+  const scglFileRef = useRef(null);
+  const courseLevel = levels[levelIndex];
+  const level = courseLevel.sandbox && sandboxLevel ? sandboxLevel : courseLevel;
   const activeLevel = useMemo(() => ({
     ...level,
     gates: [...(level.gates || []), ...(game.placedGates || [])],
@@ -73,6 +77,7 @@ function App() {
   };
 
   const changeLevel = (index) => {
+    setSandboxLevel(null);
     setLevelIndex(index);
     setGame(createGame(levels[index]));
     resetUi();
@@ -278,6 +283,60 @@ function App() {
     ? sandboxGatePlacement(level, game, gatePlacementType, gatePlacementPoint)
     : null;
 
+  const importSandboxText = (text, sourceName) => {
+    try {
+      const importedLevel = parseSCGL(text);
+      setSandboxLevel(importedLevel);
+      setGame({
+        ...createGame(importedLevel),
+        message: 'SCGL loaded from ' + sourceName + '. Edit the sandbox and export it whenever you want.',
+      });
+      resetUi();
+    } catch (error) {
+      setGame((current) => ({ ...current, message: error.message || 'SCGL import failed.' }));
+    }
+  };
+
+  const handleSCGLUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      importSandboxText(await file.text(), file.name);
+    } catch (error) {
+      setGame((current) => ({ ...current, message: 'Could not read SCGL file: ' + error.message }));
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const loadSCGLExample = async () => {
+    try {
+      const response = await fetch((process.env.PUBLIC_URL || '') + '/examples/scgl-not-wire.scgl.yaml');
+      if (!response.ok) throw new Error('example file returned HTTP ' + response.status);
+      importSandboxText(await response.text(), 'SCGL NOT Wire Example');
+    } catch (error) {
+      setGame((current) => ({ ...current, message: 'Could not load the SCGL example: ' + error.message }));
+    }
+  };
+
+  const exportSCGL = () => {
+    try {
+      const text = exportSandboxSCGL(level, activeLevel, game);
+      const blob = new Blob([text], { type: 'text/yaml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = scglDownloadName(level);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setGame((current) => ({ ...current, message: 'SCGL exported as ' + scglDownloadName(level) + '.' }));
+    } catch (error) {
+      setGame((current) => ({ ...current, message: error.message || 'SCGL export failed.' }));
+    }
+  };
+
   const nextLevel = () => {
     const nextIndex = Math.min(levelIndex + 1, levels.length - 1);
     changeLevel(nextIndex);
@@ -482,6 +541,26 @@ function App() {
               </div>
             )}
           </section>
+
+          {level.sandbox && (
+            <section className="tool-section scgl-section">
+              <div className="section-heading"><span>FILE</span><h3>SCGL level</h3></div>
+              <p className="microcopy">One human-readable file describes the sandbox level: topography, materials, devices, contacts, bits, player spawn, fabrication permissions and mission metadata.</p>
+              <input
+                ref={scglFileRef}
+                type="file"
+                accept=".yaml,.yml,.scgl,text/yaml,application/x-yaml"
+                hidden
+                onChange={handleSCGLUpload}
+              />
+              <div className="scgl-actions">
+                <button onClick={() => scglFileRef.current?.click()}><span>Upload SCGL</span><small>Load into sandbox</small></button>
+                <button onClick={exportSCGL}><span>Export SCGL</span><small>Download current level</small></button>
+                <button onClick={loadSCGLExample}><span>Load example</span><small>NOT + copper + Drive</small></button>
+              </div>
+              <p className="microcopy">Export creates a clean level definition rather than a save-game snapshot. Finish or reclaim any bit that is currently in flight or inside a gate before exporting.</p>
+            </section>
+          )}
 
           {level.sandbox && (
             <section className="tool-section gate-palette-section">

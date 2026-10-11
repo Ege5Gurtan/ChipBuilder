@@ -31,6 +31,7 @@ export function createTerrain(config = {}) {
           material: region.material || terrain[row][col].material,
           ...(region.contact !== undefined ? { contact: region.contact } : {}),
           ...(region.contactFunctional !== undefined ? { contactFunctional: region.contactFunctional } : {}),
+          ...(region.masked !== undefined ? { masked: Boolean(region.masked) } : {}),
         };
       }
     }

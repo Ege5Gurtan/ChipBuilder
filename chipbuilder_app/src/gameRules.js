@@ -133,20 +133,27 @@ function isInsideGate(gate, position) {
 }
 
 export function createGame(level) {
+  const nextGateId = Math.max(
+    0,
+    ...(level.gates || []).map((gate) => {
+      const match = String(gate.id || '').match(/^sandbox-[a-z]+-(\d+)$/i);
+      return match ? Number(match[1]) : 0;
+    })
+  ) + 1;
   return {
     levelId: level.id,
     player: { ...level.start },
-    cargo: [],
+    cargo: (level.initialCargo || []).map((item) => ({ ...item })),
     targetSlots: level.target.split('').map((bit) => ({ value: Number(bit), delivered: false })),
     // armed=false marks a freshly dropped bit that cannot be collected until the carrier leaves it.
-    worldBits: level.pickups.map(({ id, value, x, y }) => ({ id, value, x, y, armed: true })),
+    worldBits: (level.pickups || []).map(({ id, value, x, y }) => ({ id, value, x, y, armed: true })),
     atDestination: false,
     feedback: null,
     gateEvent: null,
     placedGates: [],
-    nextGateId: 1,
+    nextGateId,
     gateState: Object.fromEntries(
-      level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, processing: null, inside: false, activations: 0 }])
+      (level.gates || []).map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, processing: null, inside: false, activations: 0 }])
     ),
     fabrication: { patterned: false, etched: false },
     terrain: level.fabrication?.terrain
@@ -155,7 +162,7 @@ export function createGame(level) {
     terrainHistory: [],
     circuit: {
       sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [],
-      pinOutputs: {}, pinTransfers: 0, pinRoles: { ...(level.circuit?.initialPinRoles || {}) },
+      pinOutputs: {}, pinTransfers: 0, pinRoles: { ...(level.initialPinRoles || level.circuit?.initialPinRoles || {}) },
       prebuiltPinCells: circuitPorts(level).map((port) => cellKey(terrainCell(port.x, port.y))),
     },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },

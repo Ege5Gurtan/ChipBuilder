@@ -304,3 +304,13 @@ button:hover:not(:disabled) { filter: brightness(1.1); }
   .circuit-layout { height: max(560px, calc(100vh - 141px)); }
   .circuit-layout .mission-panel, .circuit-layout .signal-panel { overflow-y: auto; }
 }
+
+
+.scgl-actions { display: grid; gap: 7px; }
+.scgl-section button {
+  width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 3px;
+  display: flex; justify-content: space-between; gap: 12px; color: var(--paper);
+  background: #283637; cursor: pointer; text-align: left;
+}
+.scgl-section button:hover { border-color: var(--gold); }
+.scgl-section button small { color: var(--muted); }
