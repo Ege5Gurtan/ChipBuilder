@@ -390,8 +390,8 @@ function App() {
           {level.circuit && (
             <section className="tool-section circuit-section">
               <div className="section-heading"><span>02</span><h3>Copper circuit</h3></div>
-              <p className="microcopy">{terrainProcesses.includes('tungsten') ? 'Copper joins supplied pads automatically. To create a missing pin, pattern one copper tile and Deposit Tungsten. Silver pins send selected cargo or hold arriving bits for pickup.' : 'Paint → Etch → Fill Copper. The supplied SRC, IN, OUT and DEST pads work automatically when copper reaches them; no tungsten is required.'} Copper joins by shared edges.</p>
-              {connections.length === 0 && <p className="microcopy">No wire pins yet. Pattern copper beneath a ? marker, then Deposit Tungsten.</p>}
+              <p className="microcopy">{terrainProcesses.includes('tungsten') ? 'Tungsten may be deposited on any patterned tile. Only a deposit on flush copper becomes a working silver pin; elsewhere it stays visible, costs material, and is electrically inactive.' : 'Paint → Etch → Fill Copper. The supplied SRC, IN, OUT and DEST pads work automatically when copper reaches them; no tungsten is required.'} Copper joins by shared edges.</p>
+              {connections.length === 0 && <p className="microcopy">No working wire pins yet. Deposit tungsten on flush copper beneath a ? marker; deposits on silicon or raised material will not conduct.</p>}
               {connections.map((port) => (
                 <div className={`circuit-connection ${port.ready ? 'connected' : ''}`} key={port.id}>
                   <strong>{port.label}</strong><p className="microcopy">{port.reason}</p>
@@ -506,9 +506,9 @@ function App() {
               {terrainProcesses.includes('tungsten') && (
                 <>
                   <button onClick={() => runTerrainProcess('tungsten')} disabled={!maskedTiles || Boolean(game.circuit.packets.length)}>
-                    <span>Deposit Tungsten pins</span><small>{FAB_TOOLS.tungsten.base} + {FAB_TOOLS.tungsten.cell}/new pin</small>
+                    <span>Deposit Tungsten</span><small>{FAB_TOOLS.tungsten.base} + {FAB_TOOLS.tungsten.cell}/deposited tile</small>
                   </button>
-                  <p className="microcopy">Pattern copper tiles at height 1. Each patterned tile becomes a silver contact pin; the wire stays walkable. Supplied pads already work and need no tungsten.</p>
+                  <p className="microcopy">Tungsten deposits wherever you pattern it. On copper at height 1 it becomes a functional silver pin. On silicon, oxide, or non-flush material it remains as a darker inactive deposit and still consumes process/material cost. Supplied pads already work and need no tungsten.</p>
                 </>
               )}
 
