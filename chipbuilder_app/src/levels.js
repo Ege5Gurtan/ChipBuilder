@@ -175,7 +175,7 @@ const levels = [
   {
     id: 'build-source-pin', number: '10', title: 'Build the SRC Pin',
     goal: 'Create the missing SRC pin on the copper wire. Send a 0 through NOT to deliver 1.',
-    lesson: 'The copper wires and gate pins are supplied, but SRC is missing. Click the copper tile under SRC? to pattern it, then Deposit Tungsten. Collect the 0, select it and click your silver SRC pin (or press K nearby). Existing IN, OUT and DEST pads need no tungsten.',
+    lesson: 'The copper wires and gate pins are supplied, but SRC is missing. Pattern the tile under SRC? and Deposit Tungsten. Tungsten can be deposited anywhere, but only tungsten on flush copper becomes a working pin; a deposit on silicon or raised material still costs resources and stays electrically inactive. Collect the 0, then use the working SRC pin.',
     target: '1', start: { x: -5.2, y: -2.8 }, destination: { x: 4.333, y: -0.375 },
     pickups: [{ id: 'pin-zero', value: 0, x: -4.3, y: -2.5 }], obstacles: [],
     gates: [{ id: 'pin-not', type: 'NOT', wired: true, x: 0, y: -0.375, inputs: [{ id: 'in', label: 'IN' }] }],
@@ -188,7 +188,7 @@ const levels = [
   {
     id: 'build-wire-pins', number: '11', title: 'Build Both Wire Pins',
     goal: 'Create two tungsten pins, send the 1 along copper, collect it at the other pin, and carry it to DEST.',
-    lesson: 'Pattern the two copper endpoints marked IN? and OUT?, then Deposit Tungsten once. Select the 1 and click IN to send it. Walk over OUT to collect the arriving bit; carry it to DEST and press Enter. Both pins use the same material: where you inject the bit determines direction.',
+    lesson: 'Pattern the two copper endpoints marked IN? and OUT?, then Deposit Tungsten once. You are free to include other tiles in the mask, but tungsten away from flush copper becomes an inactive, wasteful deposit. Select the 1 and click IN to send it. Walk over OUT to collect the arriving bit; carry it to DEST and press Enter.',
     target: '1', start: { x: -5.2, y: -2.8 }, destination: { x: 5.2, y: 2.8 },
     pickups: [{ id: 'two-pin-one', value: 1, x: -4.3, y: -2.5 }], obstacles: [], gates: [],
     circuit: { sources: [], requirePinTransfer: true, pinHints: [{ x: -4.333, y: -0.375, label: 'IN' }, { x: 4.333, y: -0.375, label: 'OUT' }] },
