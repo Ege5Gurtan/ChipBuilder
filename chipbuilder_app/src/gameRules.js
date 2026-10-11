@@ -625,14 +625,16 @@ function circuitNets(level, state) {
     return (edges.get(from) || []).some((gateId) => reaches(gateId, target, seen));
   };
   return nets.map((net) => {
-    const staticDriver = net.drivers.length === 1 && net.drivers[0];
+    const fixedDrivers = net.drivers.filter((port) => port.kind !== 'pin');
     const activeDrivers = net.ports.filter((port) => circuitDriverActive(state, port));
+    const fixedConflict = fixedDrivers.length > 1;
     return {
       ...net,
       activeDrivers,
-      conflict: activeDrivers.length > 1,
-      cycle: staticDriver?.kind === 'gateOutput'
-        && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, staticDriver.gateId)),
+      fixedConflict,
+      conflict: fixedConflict || activeDrivers.length > 1,
+      cycle: net.drivers.some((driver) => driver.kind === 'gateOutput'
+        && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, driver.gateId))),
     };
   });
 }
@@ -653,8 +655,9 @@ export function circuitConnections(level, state) {
       reason: port.kind === 'pin' && state.circuit.pinOutputs[port.id]
         ? `Holding bit ${state.circuit.pinOutputs[port.id].value}. Walk over this tungsten pin to collect it.`
         : !net ? 'Open: copper has not reached this pad.'
-        : net.conflict ? 'Short: more than one active driver is sending onto this copper. Wait, reclaim a bit, or separate the traces.'
-          : net.cycle ? 'Feedback loop: route the output forward to another component or DEST.'
+        : net.fixedConflict ? 'Short: multiple built-in output drivers share this copper. Separate the traces.'
+          : net.conflict ? 'Short: more than one active driver is sending onto this copper. Wait, reclaim a bit, or separate the traces.'
+            : net.cycle ? 'Feedback loop: route the output forward to another component or DEST.'
             : receiving ? `Receives from ${activeOtherDrivers[0].label}. Walk over this pin to collect a waiting bit.`
               : !receivers.length ? 'Open: this trace does not reach another receiving pin or input.'
                 : `Connected to ${receivers.map((receiver) => receiver.label).join(', ')}.`,
