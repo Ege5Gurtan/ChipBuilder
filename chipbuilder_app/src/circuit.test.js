@@ -16,6 +16,16 @@ function run(state, mission = level) {
   return state;
 }
 
+test('dropping anywhere on the SRC-to-IN copper injects toward IN and completes the wired NOT path', () => {
+  let state = withCargo(fabricateRoute());
+  state = dropCargoBit(level, { ...state, player: { x: -2.2, y: -0.375 } }, 'test-bit');
+  expect(state.circuit.packets).toHaveLength(1);
+  expect(state.worldBits.some((bit) => bit.id === 'test-bit')).toBe(false);
+  const result = run(state);
+  expect(result.status).toBe('success');
+  expect(result.gateState['wired-not'].activations).toBe(1);
+});
+
 test('source → copper → NOT → copper → DEST completes while the carrier stays still', () => {
   let state = withCargo(fabricateRoute());
   expect(circuitConnections(level, state).every((port) => port.ready)).toBe(true);
@@ -289,18 +299,35 @@ test('etching away an occupied output pin returns its bit and breaks copper cont
   expect(etched.circuit.pinOutputs).toEqual({});
 });
 
-test('K always drops cargo freely even beside a working pin; explicit pin loading still sends', () => {
+test('dropping onto a valid two-port copper net injects the bit from anywhere on the wire', () => {
   let state = makePins(createGame(sourcePinLevel), [[2, 5], [7, 5], [11, 5], [15, 5]]);
   expect(state.terrain.flat().filter((cell) => cell.contact === 'tungsten')).toHaveLength(1);
   expect(state.cost.manufacturing).toBe(52); // 26 mask + 26 tungsten; supplied pads skipped.
   state = withCargo(state);
-  const pin = circuitConnections(sourcePinLevel, state).find((port) => port.id === 'pin-2-5');
-  const dropped = dropCargoBit(sourcePinLevel, { ...state, player: pin }, 'test-bit');
+  const middleOfWire = { x: -2.2, y: -0.375 };
+  const dropped = dropCargoBit(sourcePinLevel, { ...state, player: middleOfWire }, 'test-bit');
+  expect(dropped.cargo).toHaveLength(0);
+  expect(dropped.worldBits.some((bit) => bit.id === 'test-bit')).toBe(false);
+  expect(dropped.circuit.packets).toHaveLength(1);
+  expect(dropped.message).toMatch(/wire accepted it/);
+  expect(run(dropped, sourcePinLevel).status).toBe('success');
+});
+
+test('dropping off copper remains a free wafer drop', () => {
+  const state = withCargo(createGame(sourcePinLevel));
+  const dropped = dropCargoBit(sourcePinLevel, { ...state, player: { x: -5.2, y: -2.8 } }, 'test-bit');
   expect(dropped.cargo).toHaveLength(0);
   expect(dropped.worldBits.some((bit) => bit.id === 'test-bit')).toBe(true);
-  expect(dropped.circuit.sources['pin-2-5']).toBeUndefined();
+  expect(dropped.circuit.packets).toHaveLength(0);
+});
 
-  const explicit = depositCargo(sourcePinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
-  expect(explicit.cargo).toHaveLength(0);
-  expect(run(explicit, sourcePinLevel).status).toBe('success');
+test('dropping in the middle of a two-pin wire sends the bit to the opposite pin', () => {
+  let state = withCargo(makePins(createGame(twoPinLevel), [[2, 5], [15, 5]]), 1);
+  state = dropCargoBit(twoPinLevel, { ...state, player: { x: 0, y: -0.375 } }, 'test-bit');
+  expect(state.circuit.packets).toHaveLength(1);
+  state = run(state, twoPinLevel);
+  const outputs = Object.values(state.circuit.pinOutputs);
+  expect(outputs).toHaveLength(1);
+  expect(outputs[0].value).toBe(1);
+  expect(state.circuit.pinTransfers).toBe(1);
 });
