@@ -200,11 +200,16 @@ const levels = [
     title: 'Process Sandbox',
     sandbox: true,
     goal: 'Use the blank wafer to experiment freely with fabrication processes and logic gates.',
-    lesson: 'Start from a completely flat silicon wafer. All process operations are unlocked. Drag NOT, AND, or OR gates from the side panel onto the wafer, then use the single 1 bit to test carrier, gate, pickup, drop, and wiring interactions while you build freely.',
+    lesson: 'Start from a completely flat silicon wafer. All process operations are unlocked. Drag NOT, AND, or OR gates from the side panel onto the wafer, then use the supplied 0 and 1 bits to test carrier, gate, pickup, drop, and wiring interactions while you build freely.',
     target: '1',
     start: { x: -5.2, y: -3.45 },
     destination: { x: 5.2, y: 3.45 },
-    pickups: [{ id: 'sandbox-test-one', value: 1, x: -3.9, y: -3.0 }],
+    pickups: [
+      { id: 'sandbox-zero-a', value: 0, x: -4.3, y: -3.0 },
+      { id: 'sandbox-one-a', value: 1, x: -3.2, y: -3.0 },
+      { id: 'sandbox-zero-b', value: 0, x: -2.1, y: -3.0 },
+      { id: 'sandbox-one-b', value: 1, x: -1.0, y: -3.0 },
+    ],
     obstacles: [],
     gates: [],
     fabrication: {
