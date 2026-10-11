@@ -70,7 +70,7 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
 # Gameplay
 
-Eleven selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, copper interconnects, and tungsten wire pins. WASD always controls the carrier while the mouse paints fabrication patterns. K physically drops the selected cargo bit: off wire it stays on the wafer, while on a valid two-socket copper connection it is injected automatically from that point and travels through the wire. Gates/sources/pins can also be loaded explicitly via click, drag/drop, or the circuit-panel send button. Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
+Eleven selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, copper interconnects, and tungsten wire pins. WASD always controls the carrier while the mouse paints fabrication patterns. K physically drops the selected cargo bit: a drop onto an empty manual gate input loads that socket, a drop on a valid two-socket copper connection is injected automatically into the wire, and other drops stay on the wafer. Gates/sources/pins can also be loaded explicitly via click, drag/drop, or the circuit-panel send button. Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
 
 ## Level 09: Wire the NOT Gate
 
