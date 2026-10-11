@@ -486,8 +486,7 @@ export function fabricate(level, state, action) {
 
 export function canFabricateCell(state, action, col, row) {
   if (state.status !== 'playing' || !state.terrain || action !== 'lithography') return false;
-  const cell = state.terrain[row]?.[col];
-  return Boolean(cell && !cell.masked);
+  return Boolean(state.terrain[row]?.[col]);
 }
 
 function terrainSnapshot(state) {
@@ -539,22 +538,29 @@ export function fabricateCell(state, action, col, row, newStroke) {
   if (state.circuit.packets.length) return { ...state, message: 'Wait for the signal to arrive before editing its route.' };
   const cell = state.terrain[row][col];
   const alreadyPatterned = state.terrain.some((cells) => cells.some((item) => item.masked));
+  const nextMasked = !cell.masked;
   const terrain = state.terrain.map((cells, index) => index === row ? cells.slice() : cells);
-  terrain[row][col] = { ...cell, masked: true };
+  terrain[row][col] = { ...cell, masked: nextMasked };
 
   const tool = FAB_TOOLS.lithography;
-  const startsPattern = newStroke && !alreadyPatterned;
-  const strokeCost = tool.cell + (startsPattern ? tool.base : 0);
+  const stillPatterned = terrain.some((cells) => cells.some((item) => item.masked));
+  const startsPattern = nextMasked && newStroke && !alreadyPatterned;
+  const clearsPattern = !nextMasked && alreadyPatterned && !stillPatterned;
+  const costDelta = nextMasked
+    ? tool.cell + (startsPattern ? tool.base : 0)
+    : -(tool.cell + (clearsPattern ? tool.base : 0));
   return {
     ...state,
     terrain,
     terrainHistory: newStroke ? pushTerrainHistory(state) : state.terrainHistory,
     cost: {
       ...state.cost,
-      processSteps: state.cost.processSteps + Number(startsPattern),
-      manufacturing: state.cost.manufacturing + strokeCost,
+      processSteps: state.cost.processSteps + Number(startsPattern) - Number(clearsPattern),
+      manufacturing: state.cost.manufacturing + costDelta,
     },
-    message: `Lithography pattern: tile added. ${startsPattern ? `+${tool.base} setup + ` : '+'}${tool.cell} credits.`,
+    message: nextMasked
+      ? `Lithography pattern: tile added. ${startsPattern ? `+${tool.base} setup + ` : '+'}${tool.cell} credits.`
+      : `Lithography pattern: tile removed. ${Math.abs(costDelta)} credits refunded.`,
   };
 }
 
