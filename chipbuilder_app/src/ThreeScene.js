@@ -182,36 +182,33 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
         const key = `${gate.id}:${input.id}`;
         const position = gateInputPosition(gate, input.id);
         const group = new THREE.Group();
-        group.position.set(position.x, 0.72, -position.y);
+        group.position.set(position.x, 0.62, -position.y);
         group.userData.socket = key;
 
-        const ringMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7d7c, emissive: 0x000000, metalness: 0.35, roughness: 0.45 });
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.075, 8, 32), ringMaterial);
-        ring.rotation.x = Math.PI / 2; ring.userData.socket = key; group.add(ring);
+        const ringMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7d7c, emissive: 0x000000, metalness: 0.45, roughness: 0.4 });
+        const ring = new THREE.Mesh(
+          new THREE.BoxGeometry(TILE_WIDTH * 0.92, 0.08, TILE_DEPTH * 0.92),
+          ringMaterial
+        );
+        ring.userData.socket = key; group.add(ring);
 
         const pad = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.27, 0.27, 0.09, 24),
-          new THREE.MeshStandardMaterial({ color: 0x182829, metalness: 0.2, roughness: 0.6 })
+          new THREE.BoxGeometry(TILE_WIDTH * 0.64, 0.045, TILE_DEPTH * 0.64),
+          new THREE.MeshStandardMaterial({ color: 0x182829, metalness: 0.25, roughness: 0.58 })
         );
-        pad.userData.socket = key; group.add(pad);
+        pad.position.y = 0.065; pad.userData.socket = key; group.add(pad);
 
         const hitTarget = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.49, 0.49, 0.08, 20),
+          new THREE.BoxGeometry(TILE_WIDTH, 0.18, TILE_DEPTH),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
         );
         hitTarget.userData.socket = key; group.add(hitTarget);
 
-        const inputLabel = label(input.label, '#d7dfdc'); inputLabel.position.y = 0.62; group.add(inputLabel);
-        const loadedZero = orb(0x72e2d4, 0.2); loadedZero.position.y = 0.13; loadedZero.visible = false; group.add(loadedZero);
+        const inputLabel = label(input.label, '#d7dfdc'); inputLabel.position.y = 0.64; group.add(inputLabel);
+        const loadedZero = orb(0x72e2d4, 0.2); loadedZero.position.y = 0.2; loadedZero.visible = false; group.add(loadedZero);
         const zeroLabel = label('0'); zeroLabel.position.y = 0.48; loadedZero.add(zeroLabel);
-        const loadedOne = orb(0xffc87a, 0.2); loadedOne.position.y = 0.13; loadedOne.visible = false; group.add(loadedOne);
+        const loadedOne = orb(0xffc87a, 0.2); loadedOne.position.y = 0.2; loadedOne.visible = false; group.add(loadedOne);
         const oneLabel = label('1'); oneLabel.position.y = 0.48; loadedOne.add(oneLabel);
-
-        const trace = new THREE.Mesh(
-          new THREE.BoxGeometry(0.44, 0.07, 0.07),
-          new THREE.MeshStandardMaterial({ color: 0x849493, metalness: 0.45, roughness: 0.4 })
-        );
-        trace.position.set(gate.x - width / 2 - 0.2, 0.68, -position.y); scene.add(trace);
 
         scene.add(group);
         gatePorts.set(key, { group, ring, loadedZero, loadedOne });
@@ -221,22 +218,22 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (gate.inputs?.length) {
         const position = gateOutputPosition(gate);
         const group = new THREE.Group();
-        group.position.set(position.x, 0.72, -position.y);
+        group.position.set(position.x, 0.62, -position.y);
         const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(0.39, 0.075, 8, 32),
-          new THREE.MeshStandardMaterial({ color: 0x9a7a39, emissive: 0x000000, metalness: 0.35, roughness: 0.4 })
+          new THREE.BoxGeometry(TILE_WIDTH * 0.92, 0.08, TILE_DEPTH * 0.92),
+          new THREE.MeshStandardMaterial({ color: 0x9a7a39, emissive: 0x000000, metalness: 0.45, roughness: 0.38 })
         );
-        ring.rotation.x = Math.PI / 2; group.add(ring);
-        const outputLabel = label('OUT', '#ffd77d'); outputLabel.position.y = 0.58; group.add(outputLabel);
-        const outputZero = orb(0x72e2d4, 0.27); outputZero.position.y = 0.18; outputZero.visible = false; group.add(outputZero);
+        group.add(ring);
+        const outputPad = new THREE.Mesh(
+          new THREE.BoxGeometry(TILE_WIDTH * 0.64, 0.045, TILE_DEPTH * 0.64),
+          new THREE.MeshStandardMaterial({ color: 0x332d20, metalness: 0.3, roughness: 0.55 })
+        );
+        outputPad.position.y = 0.065; group.add(outputPad);
+        const outputLabel = label('OUT', '#ffd77d'); outputLabel.position.y = 0.64; group.add(outputLabel);
+        const outputZero = orb(0x72e2d4, 0.27); outputZero.position.y = 0.2; outputZero.visible = false; group.add(outputZero);
         const outputZeroLabel = label('0'); outputZeroLabel.position.y = 0.57; outputZero.add(outputZeroLabel);
-        const outputOne = orb(0xffc87a, 0.27); outputOne.position.y = 0.18; outputOne.visible = false; group.add(outputOne);
+        const outputOne = orb(0xffc87a, 0.27); outputOne.position.y = 0.2; outputOne.visible = false; group.add(outputOne);
         const outputOneLabel = label('1'); outputOneLabel.position.y = 0.57; outputOne.add(outputOneLabel);
-        const trace = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.07, 0.07),
-          new THREE.MeshStandardMaterial({ color: 0xb08b45, metalness: 0.45, roughness: 0.4 })
-        );
-        trace.position.set(gate.x + width / 2 + 0.23, 0.68, -position.y); scene.add(trace);
         scene.add(group);
         outputPorts.set(gate.id, { group, ring, outputZero, outputOne });
       }
