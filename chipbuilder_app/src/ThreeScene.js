@@ -241,7 +241,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     }
     const gatePulse = { mesh: null, start: 0 };
     visuals.current = {
-      renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, pulse,
+      renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, tungstenMaterials, pulse,
       gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts, addSourcePort, pinHints,
       clock: null, feedbackSeq: 0, gateSeq: 0,
     };
@@ -468,7 +468,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       mesh.position.y = displayHeight / 2;
       contact.visible = cell.contact === 'tungsten';
       contact.material = cell.material === 'copper' && cell.height === BASE_HEIGHT
-        ? tungstenMaterials.functional : tungstenMaterials.inactive;
+        ? refs.tungstenMaterials.functional : refs.tungstenMaterials.inactive;
       contact.position.y = displayHeight + 0.05;
     });
   }, [game, hoveredSocket, level]);
