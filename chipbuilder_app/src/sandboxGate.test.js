@@ -5,6 +5,36 @@ import { terrainCell } from './terrain.js';
 
 const sandbox = levels.find((item) => item.sandbox);
 
+
+test('sandbox NOT uses one input pin and produces the inverted bit at OUT', () => {
+  let state = placeSandboxGate(sandbox, createGame(sandbox), 'NOT', { x: 0, y: 0 });
+  const gate = state.placedGates[0];
+  const activeLevel = {
+    ...sandbox,
+    gates: [...(sandbox.gates || []), ...state.placedGates],
+  };
+
+  expect(gate.inputs).toEqual([{ id: 'in', label: 'IN' }]);
+  const input = gateInputPosition(gate, 'in');
+  const output = gateOutputPosition(gate);
+  const gatePorts = circuitPorts(activeLevel, state).filter((port) => port.gateId === gate.id);
+  expect(gatePorts.find((port) => port.inputId === 'in')).toMatchObject({ role: 'receiver', x: input.x, y: input.y });
+  expect(gatePorts.find((port) => port.kind === 'gateOutput')).toMatchObject({ role: 'driver', x: output.x, y: output.y });
+
+  state = {
+    ...state,
+    cargo: [{ id: 'not-zero', value: 0 }],
+    player: { x: input.x + 0.45, y: input.y },
+  };
+  state = dropCargoBit(activeLevel, state, 'not-zero');
+
+  expect(state.cargo).toHaveLength(0);
+  expect(state.gateState[gate.id].inputs).toEqual({});
+  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 1 });
+  expect(state.gateState[gate.id].activations).toBe(1);
+  expect(state.message).toMatch(/NOT consumed IN=0 and produced 1 at OUT/);
+});
+
 test('physical drops onto sandbox AND inputs are captured and produce an output', () => {
   let state = placeSandboxGate(sandbox, createGame(sandbox), 'AND', { x: 0, y: 0 });
   const gate = state.placedGates[0];
