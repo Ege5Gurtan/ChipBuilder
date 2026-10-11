@@ -387,7 +387,11 @@ export function dropCargoBit(level, state, cargoId) {
     && state.terrain[playerCell.row][playerCell.col].height === BASE_HEIGHT;
   const spotOnCopper = state.terrain?.[spotCell.row]?.[spotCell.col]?.material === 'copper'
     && state.terrain[spotCell.row][spotCell.col].height === BASE_HEIGHT;
-  const injected = injectDroppedBitOnCopper(level, state, item, playerOnCopper ? state.player : spotOnCopper ? spot : null);
+  const nearbyDrive = !playerOnCopper && !spotOnCopper
+    ? nearbySandboxDrivePosition(level, state, state.player)
+    : null;
+  const injectionPoint = playerOnCopper ? state.player : spotOnCopper ? spot : nearbyDrive;
+  const injected = injectDroppedBitOnCopper(level, state, item, injectionPoint);
   if (injected) return injected;
 
   return {
@@ -863,6 +867,15 @@ function sandboxPacketForBit(level, state, bit, position) {
     route,
     progress: 0,
   };
+}
+
+function nearbySandboxDrivePosition(level, state, position) {
+  if (!level.sandbox || !position) return null;
+  return circuitPorts(level, state)
+    .filter((port) => port.kind === 'pin' && state.circuit.pinRoles?.[port.id] === 'drive')
+    .map((port) => ({ port, distance: Math.hypot(position.x - port.x, position.y - port.y) }))
+    .filter(({ distance }) => distance <= GATE_INPUT_INTERACTION_RADIUS)
+    .sort((a, b) => a.distance - b.distance)[0]?.port || null;
 }
 
 function injectDroppedBitOnCopper(level, state, bit, position) {
