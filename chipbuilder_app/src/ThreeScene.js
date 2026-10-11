@@ -100,13 +100,20 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const tileGeometry = new THREE.BoxGeometry(TILE_WIDTH * 0.97, 1, TILE_DEPTH * 0.97);
     const materials = Object.fromEntries(Object.entries(tileColors).map(([name, color]) => [name, new THREE.MeshStandardMaterial({ color, roughness: ['deposit', 'copper'].includes(name) ? 0.4 : 0.68, metalness: name === 'copper' ? 0.85 : name === 'deposit' ? 0.45 : 0.12 })]));
     const maskMaterial = new THREE.MeshBasicMaterial({ color: 0xffd56a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+    const tungstenMaterials = {
+      functional: new THREE.MeshStandardMaterial({ color: 0xd1dbe5, metalness: 0.9, roughness: 0.24 }),
+      inactive: new THREE.MeshStandardMaterial({ color: 0x9b6670, metalness: 0.65, roughness: 0.42 }),
+    };
+    const tungstenGeometry = new THREE.CylinderGeometry(Math.min(TILE_WIDTH, TILE_DEPTH) * 0.24, Math.min(TILE_WIDTH, TILE_DEPTH) * 0.24, 0.08, 20);
     for (let row = 0; row < TERRAIN_ROWS; row++) for (let col = 0; col < TERRAIN_COLUMNS; col++) {
       const mesh = new THREE.Mesh(tileGeometry, materials.silicon);
       mesh.position.set(-6 + (col + 0.5) * TILE_WIDTH, 0, 4.5 - (row + 0.5) * TILE_DEPTH);
       mesh.userData = { col, row }; scene.add(mesh); tileMeshes.push(mesh);
       const mask = new THREE.Mesh(new THREE.PlaneGeometry(TILE_WIDTH * 0.7, TILE_DEPTH * 0.7), maskMaterial);
       mask.rotation.x = -Math.PI / 2; mask.position.y = 0.52; mesh.add(mask);
-      tiles.push({ mesh, mask });
+      const contact = new THREE.Mesh(tungstenGeometry, tungstenMaterials.functional);
+      contact.position.set(mesh.position.x, 0.6, mesh.position.z); contact.visible = false; scene.add(contact);
+      tiles.push({ mesh, mask, contact });
     }
     const source = orb(0x5ae9ff, 0.28);
     source.position.set(level.start.x, 0.9, -level.start.y); scene.add(source);
@@ -451,7 +458,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       mesh.visible = obstacle?.permanent || !game.fabrication.etched;
       if (obstacle?.fabricationTarget && game.fabrication.patterned) mesh.material.color.setHex(0xe3bd4e);
     });
-    refs.tiles.forEach(({ mesh, mask }, index) => {
+    refs.tiles.forEach(({ mesh, mask, contact }, index) => {
       const row = Math.floor(index / TERRAIN_COLUMNS), col = index % TERRAIN_COLUMNS;
       const cell = game.terrain?.[row]?.[col] || { height: BASE_HEIGHT, material: 'silicon', masked: false };
       mesh.material = refs.materials[cell.material] || refs.materials.silicon;
@@ -459,6 +466,10 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const displayHeight = 0.12 + cell.height * 0.44;
       mesh.scale.y = displayHeight;
       mesh.position.y = displayHeight / 2;
+      contact.visible = cell.contact === 'tungsten';
+      contact.material = cell.material === 'copper' && cell.height === BASE_HEIGHT
+        ? tungstenMaterials.functional : tungstenMaterials.inactive;
+      contact.position.y = displayHeight + 0.05;
     });
   }, [game, hoveredSocket, level]);
 
