@@ -9,7 +9,15 @@ const DROP_DISTANCE = 0.45;
 
 // Unary gates transform carried cargo automatically when the carrier crosses them.
 const PASS_THROUGH_GATES = { NOT: (value) => (value === 0 ? 1 : 0) };
-const GATE_FOOTPRINTS = { NOT: { width: 1.75, height: 1.35 }, AND: { width: 2.15, height: 1.35 } };
+const GATE_FOOTPRINTS = { NOT: { width: 1.75, height: 1.35 }, AND: { width: 2.15, height: 1.35 }, OR: { width: 2.15, height: 1.35 } };
+
+export const SANDBOX_GATE_TYPES = ['NOT', 'AND', 'OR'];
+
+const SANDBOX_GATE_BLUEPRINTS = {
+  NOT: { type: 'NOT' },
+  AND: { type: 'AND', inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+  OR: { type: 'OR', inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+};
 
 export function gateFootprint(gate) {
   return GATE_FOOTPRINTS[gate.type] || { width: 1.6, height: 1.3 };
@@ -38,6 +46,52 @@ export function applyGateToCargo(gateType, cargo) {
   return cargo.map((item) => ({ ...item, value: transform(item.value) }));
 }
 
+export function placeSandboxGate(level, state, type, position) {
+  const blueprint = SANDBOX_GATE_BLUEPRINTS[type];
+  if (!level.sandbox || state.status !== 'playing' || !blueprint || !position) return state;
+
+  const sequence = state.nextGateId || 1;
+  const gate = {
+    id: `sandbox-${type.toLowerCase()}-${sequence}`,
+    type: blueprint.type,
+    ...(blueprint.inputs ? { inputs: blueprint.inputs.map((input) => ({ ...input })) } : {}),
+    x: Math.round(position.x * 4) / 4,
+    y: Math.round(position.y * 4) / 4,
+  };
+  const { width, height } = gateFootprint(gate);
+  const portMargin = 0.55;
+  const outsideWafer = gate.x - width / 2 - portMargin < -5.65
+    || gate.x + width / 2 + portMargin > 5.65
+    || gate.y - height / 2 - portMargin < -4.15
+    || gate.y + height / 2 + portMargin > 4.15;
+  if (outsideWafer) {
+    return { ...state, message: `Move the ${type} gate farther inside the wafer so its body and ports fit.` };
+  }
+
+  const existing = [...(level.gates || []), ...(state.placedGates || [])];
+  const overlaps = existing.some((other) => {
+    const otherSize = gateFootprint(other);
+    return Math.abs(gate.x - other.x) < (width + otherSize.width) / 2 + 0.35
+      && Math.abs(gate.y - other.y) < (height + otherSize.height) / 2 + 0.35;
+  });
+  if (overlaps) {
+    return { ...state, message: `That spot overlaps another gate. Drop the ${type} gate somewhere else.` };
+  }
+
+  return {
+    ...state,
+    placedGates: [...(state.placedGates || []), gate],
+    nextGateId: sequence + 1,
+    gateState: {
+      ...state.gateState,
+      [gate.id]: { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 },
+    },
+    message: type === 'NOT'
+      ? 'NOT gate placed. Carry a bit through it to invert the cargo.'
+      : `${type} gate placed. Load A and B from cargo, then collect the result at OUT.`,
+  };
+}
+
 function isInsideGate(gate, position) {
   const { width, height } = gateFootprint(gate);
   return Math.abs(position.x - gate.x) <= width / 2 && Math.abs(position.y - gate.y) <= height / 2;
@@ -54,6 +108,8 @@ export function createGame(level) {
     atDestination: false,
     feedback: null,
     gateEvent: null,
+    placedGates: [],
+    nextGateId: 1,
     gateState: Object.fromEntries(
       level.gates.map((gate) => [gate.id, { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 }])
     ),
