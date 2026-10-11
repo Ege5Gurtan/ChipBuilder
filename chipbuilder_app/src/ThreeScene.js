@@ -86,7 +86,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (inputId === 'source') return gameRef.current.circuit.sources[gateId] || gameRef.current.circuit.pinOutputs[gateId] ? null : socket;
       if (level.gates.find((gate) => gate.id === gateId)?.wired) return null;
       if (gameRef.current.gateState[gateId]?.inputs?.[inputId] !== undefined) return null;
-      if (gameRef.current.gateState[gateId]?.pendingOutput) return null;
+      if (gameRef.current.gateState[gateId]?.pendingOutput || gameRef.current.gateState[gateId]?.processing) return null;
       return socket;
     },
     waferPointAtClientPoint(clientX, clientY) {
@@ -178,6 +178,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const gateMeshes = new Map();
     const gatePorts = new Map();
     const outputPorts = new Map();
+    const gateProgressBars = new Map();
     const gateHitTargets = [];
     level.gates.forEach((gate) => {
       const { width, height } = gateFootprint(gate);
@@ -185,6 +186,24 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       mesh.position.set(gate.x, 0.5, -gate.y); scene.add(mesh);
       gateMeshes.set(gate.id, mesh);
       const text = label(gate.type, '#f2d078'); text.position.set(gate.x, 1.12, -gate.y); scene.add(text);
+
+      const progressWidth = Math.max(0.72, width * 0.62);
+      const progressGroup = new THREE.Group();
+      progressGroup.position.set(gate.x, 0.82, -gate.y + height * 0.22);
+      progressGroup.visible = false;
+      const progressTrack = new THREE.Mesh(
+        new THREE.BoxGeometry(progressWidth, 0.035, 0.12),
+        new THREE.MeshBasicMaterial({ color: 0x172526 })
+      );
+      progressGroup.add(progressTrack);
+      const progressFill = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 0.045, 0.13),
+        new THREE.MeshBasicMaterial({ color: 0x63d9d0 })
+      );
+      progressFill.position.y = 0.025;
+      progressGroup.add(progressFill);
+      scene.add(progressGroup);
+      gateProgressBars.set(gate.id, { group: progressGroup, fill: progressFill, width: progressWidth });
 
       gate.inputs?.forEach((input) => {
         const key = `${gate.id}:${input.id}`;
@@ -272,7 +291,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const gatePulse = { mesh: null, start: 0 };
     visuals.current = {
       scene, renderer, camera, player, bits, bitMesh, obstacles, tiles, materials, tungstenMaterials, pulse,
-      gateMeshes, gatePorts, outputPorts, gateHitTargets, gatePulse, sourcePorts, addSourcePort, pinHints,
+      gateMeshes, gatePorts, outputPorts, gateProgressBars, gateHitTargets, gatePulse, sourcePorts, addSourcePort, pinHints,
       clock: null, feedbackSeq: 0, gateSeq: 0,
     };
 
@@ -588,13 +607,25 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       port.ring.material.emissiveIntensity = highlighted ? 1.35 : 1;
     });
     refs.outputPorts.forEach((port, gateId) => {
-      const pending = game.gateState[gateId]?.pendingOutput;
+      const gateState = game.gateState[gateId];
+      const pending = gateState?.pendingOutput;
+      const processing = gateState?.processing;
       const ready = Boolean(pending);
       port.outputZero.visible = pending?.value === 0;
       port.outputOne.visible = pending?.value === 1;
-      port.ring.material.color.setHex(ready ? 0xffd16c : 0x9a7a39);
-      port.ring.material.emissive.setHex(ready ? 0x7a5100 : 0x000000);
-      port.ring.material.emissiveIntensity = ready ? 1.3 : 1;
+      port.ring.material.color.setHex(ready ? 0xffd16c : processing ? 0x63d9d0 : 0x9a7a39);
+      port.ring.material.emissive.setHex(ready ? 0x7a5100 : processing ? 0x123b38 : 0x000000);
+      port.ring.material.emissiveIntensity = ready || processing ? 1.3 : 1;
+    });
+    refs.gateProgressBars.forEach((bar, gateId) => {
+      const processing = game.gateState[gateId]?.processing;
+      bar.group.visible = Boolean(processing);
+      if (!processing) return;
+      const duration = Math.max(0.0001, processing.duration || 0.0001);
+      const progress = Math.max(0, Math.min(1, 1 - processing.remaining / duration));
+      const filledWidth = Math.max(0.01, bar.width * progress);
+      bar.fill.scale.x = filledWidth;
+      bar.fill.position.x = -bar.width / 2 + filledWidth / 2;
     });
     const seq = game.feedback?.seq || 0;
     if (seq !== refs.feedbackSeq) {
