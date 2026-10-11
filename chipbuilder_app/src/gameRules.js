@@ -20,6 +20,10 @@ export function gatePropagationDelay(gate) {
 
 export const SANDBOX_GATE_TYPES = ['NOT', 'AND', 'OR'];
 
+export function usesManualPinRoles(level) {
+  return Boolean(level?.sandbox || level?.circuit?.manualPinRoles);
+}
+
 const SANDBOX_GATE_BLUEPRINTS = {
   NOT: { type: 'NOT', inputs: [{ id: 'in', label: 'IN' }] },
   AND: { type: 'AND', inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
@@ -151,7 +155,7 @@ export function createGame(level) {
     terrainHistory: [],
     circuit: {
       sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [],
-      pinOutputs: {}, pinTransfers: 0, pinRoles: {},
+      pinOutputs: {}, pinTransfers: 0, pinRoles: { ...(level.circuit?.initialPinRoles || {}) },
       prebuiltPinCells: circuitPorts(level).map((port) => cellKey(terrainCell(port.x, port.y))),
     },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
@@ -755,7 +759,7 @@ export function circuitPorts(level, state) {
       const hint = level.circuit?.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
       const pinRole = state?.circuit?.pinRoles?.[pin.id] || null;
       const driving = state?.circuit?.sources?.[pin.id] || state?.circuit?.packets?.some((packet) => packet.driverId === pin.id);
-      const role = level.sandbox
+      const role = usesManualPinRoles(level)
         ? pinRole === 'drive' ? 'driver' : pinRole === 'receive' ? 'receiver' : 'neutral'
         : driving ? 'driver' : 'receiver';
       return { ...pin, kind: 'pin', role, pinRole, label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
@@ -764,7 +768,7 @@ export function circuitPorts(level, state) {
 }
 
 export function setPinRole(level, state, pinId, pinRole) {
-  if (!level.sandbox || !['drive', 'receive'].includes(pinRole) || state.status !== 'playing') return state;
+  if (!usesManualPinRoles(level) || !['drive', 'receive'].includes(pinRole) || state.status !== 'playing') return state;
   const pin = wirePins(state.terrain).find((item) => item.id === pinId);
   if (!pin) return { ...state, message: 'That tungsten contact no longer exists.' };
   const busy = state.circuit.sources[pinId]
@@ -873,7 +877,7 @@ function circuitNets(level, state) {
   });
 }
 
-function wireDropEndpoints(net, state, position) {
+function wireDropEndpoints(level, net, state, position) {
   if (net.ports.length !== 2 || net.conflict || (net.cycle && !net.ringOscillator) || net.activeDrivers.length) return null;
   const [a, b] = net.ports;
   const sourceOnly = (port) => ['source', 'gateOutput'].includes(port.kind);
@@ -881,7 +885,12 @@ function wireDropEndpoints(net, state, position) {
   const pin = (port) => port.kind === 'pin';
   let entry = null, receiver = null;
 
-  if (sourceOnly(a) && (receiverOnly(b) || pin(b))) { entry = a; receiver = b; }
+  if (usesManualPinRoles(level)) {
+    const drive = [a, b].find((port) => pin(port) && port.pinRole === 'drive');
+    const other = drive?.id === a.id ? b : drive ? a : null;
+    const validReceiver = other && (receiverOnly(other) || (pin(other) && other.pinRole === 'receive'));
+    if (drive && validReceiver) { entry = drive; receiver = other; }
+  } else if (sourceOnly(a) && (receiverOnly(b) || pin(b))) { entry = a; receiver = b; }
   else if (sourceOnly(b) && (receiverOnly(a) || pin(a))) { entry = b; receiver = a; }
   else if (pin(a) && receiverOnly(b)) { entry = a; receiver = b; }
   else if (pin(b) && receiverOnly(a)) { entry = b; receiver = a; }
@@ -955,7 +964,7 @@ function injectDroppedBitOnCopper(level, state, bit, position) {
   const cell = terrainCell(position.x, position.y);
   const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
   if (!net) return null;
-  const endpoints = wireDropEndpoints(net, state, position);
+  const endpoints = wireDropEndpoints(level, net, state, position);
   if (!endpoints) return null;
   const route = wireRoute(net, position, endpoints.receiver);
   if (!route.length) return null;
@@ -1004,10 +1013,12 @@ export function circuitConnections(level, state) {
     const ready = Boolean(net && !net.conflict && (!net.cycle || net.ringOscillator) && (receiving || receivers.length));
     const busy = Boolean(state.circuit.sources[port.id] || state.circuit.pinOutputs[port.id]
       || state.circuit.packets.some((packet) => packet.driverId === port.id || packet.receiver.id === port.id));
+    const roleAllowsSend = !usesManualPinRoles(level) || port.kind !== 'pin' || port.pinRole === 'drive';
     return {
-      ...port, ready, canSend: ready && !receiving && !busy,
+      ...port, ready, canSend: ready && !receiving && !busy && roleAllowsSend,
       reason: port.kind === 'pin' && state.circuit.pinOutputs[port.id]
         ? `Holding bit ${state.circuit.pinOutputs[port.id].value}. Walk over this tungsten pin to collect it.`
+        : !roleAllowsSend ? 'Set this tungsten contact to Drive before sending a bit.'
         : !net ? 'Open: copper has not reached this pad.'
         : net.fixedConflict ? 'Short: multiple built-in output drivers share this copper. Separate the traces.'
           : net.conflict ? 'Short: more than one active driver is sending onto this copper. Wait, reclaim a bit, or separate the traces.'
@@ -1195,9 +1206,10 @@ function advanceGateProcessing(level, state, delta) {
 
 // Called independently of carrier movement. State owns transport; Three.js only draws packets.
 export function advanceCircuit(level, state, delta) {
-  if ((!level.circuit && !level.sandbox) || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
+  if (state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
   let energized = level.sandbox ? energizeSandboxWorldBits(level, state) : state;
   energized = advanceGateProcessing(level, energized, delta);
+  if (!level.circuit && !level.sandbox) return energized;
   const pendingDriver = Object.values(energized.circuit.sources).some(Boolean)
     || level.gates.some((gate) => (gate.wired || level.sandbox) && energized.gateState[gate.id]?.pendingOutput);
   if (!energized.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, energized);

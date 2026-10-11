@@ -70,30 +70,24 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
 # Gameplay
 
-Eleven selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, copper interconnects, and tungsten wire pins. WASD always controls the carrier while the mouse paints fabrication patterns. K physically drops the selected cargo bit: a drop onto an empty manual gate input loads that socket, a drop on a valid two-socket copper connection is injected automatically into the wire, and other drops stay on the wafer. Gates/sources/pins can also be loaded explicitly via click, drag/drop, or the circuit-panel send button. Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
+Nine numbered missions plus the Process Sandbox teach carrier movement, signal delivery, lithography, etching, deposition, CMP, explicit logic-gate timing, copper interconnects, and tungsten contacts. The removed 05 and 11 slots are intentionally absent so the remaining mission numbers keep their existing references. WASD always controls the carrier while fabrication remains available with the mouse. Enter delivers collected cargo at DEST.
 
-## Level 09: Wire the NOT Gate
+## Level 08: Explicit NOT gate timing
 
-1. Paint two separate horizontal traces on the row containing the pads: SRC to NOT IN, and NOT OUT to DEST. Include the tile beneath each pad. Do not join the two output drivers together.
-2. Click **Etch patterned tiles**, then **Fill Copper in trenches**. Copper fills all height-0 trenches and automatically contacts any pad it reaches. This introductory process combines fill and flush finishing; this level supplies the contact pads, so tungsten is not required. Vias and wire CMP are future features.
-3. Collect the 0. Select it and click SRC or the sidebar's send button, or drag it onto SRC. K is reserved for dropping cargo onto the wafer.
-4. Watch the signal travel through the copper, invert at NOT, and deliver 1 automatically at DEST. The carrier does not need to move during transport. Alternatively, leave OUT unconnected, walk over the waiting output bit to collect it, carry it to DEST and press Enter. Walking through a wired gate does not invert cargo.
+Level 08 uses the same explicit gate rule as newer logic gates: NOT has a physical IN contact, a physical OUT contact, and a propagation delay. Load the 0 into IN, watch the progress bar fill, then collect the inverted 1 from OUT. Walking through this NOT gate does not flip cargo.
 
-Copper is passive and joins only across shared tile edges. Ports determine direction. The circuit panel explains open connections, multiple-driver shorts, and feedback loops. Gate outputs wait for available receivers; fan-out sends one copy of a finite token to each receiver. A rejected destination value returns to cargo. Edits and undo pause while packets are in transit. Ctrl+Z refunds fabrication costs while preserving gameplay energy.
+## Level 09: Build the Driver Contact
 
-## Levels 10–11: Tungsten wire pins
+Level 09 no longer has SRC. A single copper tile is supplied beside NOT IN. Pattern that tile, **Deposit Tungsten**, click the resulting contact, and set its role to **Drive**. Send the collected 0 from the Drive contact into NOT, wait for the propagation delay, collect 1 at OUT, and carry it to DEST.
 
-In **Build the SRC Pin**, copper wires, NOT IN/OUT and DEST pads are supplied, but SRC is missing. Click the copper tile beneath **SRC?** to pattern it, then click **Deposit Tungsten**. Collect the 0 and send it from your new silver SRC pin using click, drag/drop, or the circuit panel.
+## Level 10: Connect the Driver
 
-In **Build Both Wire Pins**, pattern both copper endpoints marked **IN?** and **OUT?**, then deposit tungsten once. Send the 1 into either pin, walk over the other pin to collect the received bit, and carry it to DEST. Press Enter to deliver; this lesson requires a pin-to-pin transfer first.
+Level 10 also has no SRC. It starts with a functional tungsten Drive contact already sitting on one copper tile. Fabricate a copper trace from the tile next to that contact to the NOT input using lithography, etch, and copper fill. The supplied tungsten contact stays intact while the player builds the connection. Send 0 through the completed trace, then collect the resulting 1 at OUT and carry it to DEST.
 
-Tungsten may be deposited on any patterned tile. Deposition costs 20 setup credits plus 6 per newly deposited tile and clears the mask even when the placement is wrong. Tungsten on flush copper at height 1 becomes a functional silver wire pin; tungsten on silicon, oxide, or non-flush terrain remains visible as a darker electrically inactive deposit, so a bad fabrication choice wastes resources instead of being blocked. Supplied or existing pads need no extra tungsten. Functional pins hold one bit and wait for free receivers. Removing an occupied pin with fabrication or undo returns its bit to cargo. This is a simplified game process, not a detailed fabrication recipe.
+Copper is passive and joins only across shared tile edges. Explicit Drive/Receive roles define direction for mission contacts that use manual pin roles. Gate inputs are receivers and gate outputs are drivers. Gate processing, wire packets, signal state, and win conditions live in gameplay state rather than the renderer.
+
+Tungsten on flush copper at height 1 becomes a functional wire contact; tungsten elsewhere is electrically inactive. The terrain format can also supply a prebuilt tungsten contact, which Level 10 uses for its starting Drive contact.
 
 The rules and level data are independent of rendering: `gameRules.js` owns gameplay and circuit state, `circuit.js` derives nets/routes, `terrain.js` defines terrain and costs, `levels.js` defines missions, and `ThreeScene.js` renders the wafer and handles input.
 
 Run `CI=true npm test -- --watchAll=false --runInBand` for circuit and gameplay regression checks, and `CI=true npm run build` for production validation.
-
-
-Circuit driver conflicts are evaluated from active signal tokens rather than static output-capable pads. A tungsten pin may therefore drive a connected net while a built-in source or gate output on that net is idle; two simultaneously active drivers still block transport as a short.
-
-A dropped bit does not need to land exactly on SRC/IN/OUT. On a simple copper net with exactly two compatible sockets, dropping anywhere on the trace injects the bit into the wire. SRC/OUT-side sockets establish the source side toward IN/DEST/pin receivers; a pin-to-pin wire uses the nearer pin as the entry side and sends toward the opposite pin. Invalid, ambiguous, busy, shorted, or open nets keep the bit as a normal wafer drop.

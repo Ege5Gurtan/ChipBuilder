@@ -1,8 +1,13 @@
 import levels from './levels.js';
 import { wireNets } from './circuit.js';
-import { advanceCircuit, applyTerrainProcess, attemptSignalDelivery, circuitConnections, createGame, depositCargo, dropCargoBit, fabricateCell, gateOutputPosition, movePlayer, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, applyTerrainProcess, attemptSignalDelivery, circuitConnections, createGame, depositCargo, dropCargoBit, fabricateCell, gateOutputPosition, movePlayer, setPinRole, undoTerrainEdit } from './gameRules.js';
 
-const level = levels.find((item) => item.circuit);
+const gameplayCircuitLevel = levels.find((item) => item.id === 'copper-not-route');
+const level = {
+  ...gameplayCircuitLevel,
+  fabrication: { terrain: {}, allowedProcesses: ['lithography', 'etch', 'copper', 'tungsten'] },
+  circuit: { sources: [{ id: 'source', label: 'SRC', x: -4.333, y: -0.375 }] },
+};
 const routeCells = [...Array.from({ length: 6 }, (_, i) => [i + 2, 5]), ...Array.from({ length: 5 }, (_, i) => [i + 11, 5])];
 function fabricateRoute(cells = routeCells, mission = level) {
   let state = createGame(mission);
@@ -208,22 +213,96 @@ test('a feedback loop holds its finite output token instead of generating endles
   expect(run(state).gateState['wired-not'].pendingOutput.id).toBe('held');
 });
 
-test('existing pass-through NOT and normal carrier delivery still work', () => {
-  const mission = levels[7], gate = mission.gates[0];
-  const state = withCargo(createGame(mission));
-  const flipped = movePlayer(mission, { ...state, player: { x: gate.x, y: gate.y } }, { x: 0, y: 0 });
-  expect(flipped.cargo[0].value).toBe(1);
-  const held = movePlayer(mission, flipped, { x: 0, y: 0 });
-  expect(held.cargo[0].value).toBe(1);
-  expect(attemptSignalDelivery(mission, { ...held, player: mission.destination }).status).toBe('success');
+test('level 08 NOT uses explicit IN/OUT and advances its propagation timer without a copper circuit', () => {
+  const mission = levels.find((item) => item.id === 'fabricate-not-route');
+  const gate = mission.gates[0];
+  let state = withCargo(createGame(mission));
+  state = depositCargo(mission, state, 'test-bit', { kind: 'gate', gateId: gate.id, inputId: 'in' });
+  expect(state.cargo).toHaveLength(0);
+  expect(state.gateState[gate.id].processing).not.toBeNull();
+  const remaining = state.gateState[gate.id].processing.remaining;
+  state = advanceCircuit(mission, state, 0.25);
+  expect(state.gateState[gate.id].processing.remaining).toBeLessThan(remaining);
+  state = advanceCircuit(mission, state, 1);
+  expect(state.gateState[gate.id].pendingOutput.value).toBe(1);
+  state = movePlayer(mission, { ...state, player: gateOutputPosition(gate) }, { x: 0, y: 0 });
+  expect(state.cargo.map((bit) => bit.value)).toEqual([1]);
+  expect(attemptSignalDelivery(mission, { ...state, player: mission.destination }).status).toBe('success');
 });
 
-const sourcePinLevel = levels.find((item) => item.id === 'build-source-pin');
-const twoPinLevel = levels.find((item) => item.id === 'build-wire-pins');
+const sourcePinGameplayLevel = levels.find((item) => item.id === 'build-source-pin');
+const sourcePinLevel = {
+  ...sourcePinGameplayLevel,
+  circuit: { sources: [], pinHints: [{ x: -4.333, y: -0.375, label: 'SRC' }] },
+  fabrication: {
+    terrain: { regions: [{ rows: [5, 5], cols: [2, 7], material: 'copper' }, { rows: [5, 5], cols: [11, 15], material: 'copper' }] },
+    allowedProcesses: ['lithography', 'tungsten', 'etch'],
+  },
+};
+const twoPinLevel = {
+  id: 'two-pin-test',
+  number: 'TEST',
+  title: 'Two pin test fixture',
+  target: '1',
+  start: { x: -5.2, y: -2.8 },
+  destination: { x: 5.2, y: 2.8 },
+  pickups: [],
+  obstacles: [],
+  gates: [],
+  circuit: {
+    sources: [],
+    requirePinTransfer: true,
+    pinHints: [{ x: -4.333, y: -0.375, label: 'IN' }, { x: 4.333, y: -0.375, label: 'OUT' }],
+  },
+  fabrication: {
+    terrain: { regions: [{ rows: [5, 5], cols: [2, 15], material: 'copper' }] },
+    allowedProcesses: ['lithography', 'tungsten', 'etch'],
+  },
+};
 function makePins(state, cells) {
   cells.forEach(([col, row], i) => { state = fabricateCell(state, 'lithography', col, row, i === 0); });
   return applyTerrainProcess(state, 'tungsten');
 }
+
+test('level 09 replaces SRC with a copper tile that must become a tungsten Drive contact', () => {
+  const mission = levels.find((item) => item.id === 'copper-not-route');
+  let state = withCargo(createGame(mission));
+  expect(mission.circuit.sources).toEqual([]);
+  expect(state.terrain[5][6]).toMatchObject({ material: 'copper', height: 1 });
+  state = fabricateCell(state, 'lithography', 6, 5, true);
+  state = applyTerrainProcess(state, 'tungsten');
+  expect(state.terrain[5][6]).toMatchObject({ contact: 'tungsten', contactFunctional: true });
+  const blocked = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-6-5' });
+  expect(blocked.cargo).toHaveLength(1);
+  expect(blocked.message).toMatch(/Drive/);
+  state = setPinRole(mission, state, 'pin-6-5', 'drive');
+  state = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-6-5' });
+  state = run(state, mission);
+  expect(state.gateState['wired-not'].activations).toBe(1);
+  expect(state.gateState['wired-not'].pendingOutput.value).toBe(1);
+});
+
+test('level 10 starts with a tungsten Drive contact and requires copper to reach NOT IN', () => {
+  const mission = levels.find((item) => item.id === 'build-source-pin');
+  let state = withCargo(createGame(mission));
+  expect(mission.circuit.sources).toEqual([]);
+  expect(state.terrain[5][2]).toMatchObject({
+    material: 'copper', height: 1, contact: 'tungsten', contactFunctional: true,
+  });
+  expect(state.circuit.pinRoles['pin-2-5']).toBe('drive');
+  expect(circuitConnections(mission, state).find((port) => port.id === 'pin-2-5').ready).toBe(false);
+
+  [[3, 5], [4, 5], [5, 5], [6, 5]].forEach(([col, row], index) => {
+    state = fabricateCell(state, 'lithography', col, row, index === 0);
+  });
+  state = applyTerrainProcess(state, 'etch');
+  state = applyTerrainProcess(state, 'copper');
+  expect(circuitConnections(mission, state).find((port) => port.id === 'pin-2-5').canSend).toBe(true);
+  state = depositCargo(mission, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
+  state = run(state, mission);
+  expect(state.gateState['pin-not'].activations).toBe(1);
+  expect(state.gateState['pin-not'].pendingOutput.value).toBe(1);
+});
 
 test('missing SRC cannot load until tungsten creates a walkable copper contact; supplied gate pads work immediately', () => {
   let state = withCargo(createGame(sourcePinLevel));

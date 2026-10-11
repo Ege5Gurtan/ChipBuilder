@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, sandboxGatePlacement, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, sandboxGatePlacement, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit, usesManualPinRoles } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -49,8 +49,9 @@ function App() {
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
   const socketGates = activeLevel.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
   const connections = activeLevel.circuit ? circuitConnections(activeLevel, game) : [];
-  const sandboxPins = level.sandbox ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
-  const selectedContactPin = sandboxPins.find((pin) => pin.id === selectedContactPinId) || null;
+  const rolePinsEnabled = usesManualPinRoles(level);
+  const rolePins = rolePinsEnabled ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
+  const selectedContactPin = rolePins.find((pin) => pin.id === selectedContactPinId) || null;
   const selectedContactSignal = selectedContactPin
     ? game.circuit.sources[selectedContactPin.id]
       || game.circuit.pinOutputs[selectedContactPin.id]
@@ -135,7 +136,7 @@ function App() {
   const socketAt = (x, y) => sceneRef.current?.gateSocketAtClientPoint(x, y) || null;
 
   const interactWithContact = (pinId) => {
-    if (!level.sandbox) return;
+    if (!rolePinsEnabled) return;
     setSelectedContactPinId(pinId);
     setGame((current) => ({
       ...current,
@@ -156,7 +157,7 @@ function App() {
       return;
     }
     if (activeLevel.gates.find((gate) => gate.id === gateId)?.wired) {
-      setGame((current) => ({ ...current, message: 'This gate receives bits through copper. Connect SRC to IN, then load the bit at SRC.' }));
+      setGame((current) => ({ ...current, message: 'This gate receives bits through copper. Connect a Drive contact to IN, then send the bit from that contact.' }));
       return;
     }
     const loaded = game.gateState[gateId]?.inputs?.[inputId];
@@ -503,7 +504,7 @@ function App() {
             </section>
           )}
 
-          {level.sandbox && (
+          {rolePinsEnabled && (
             <section className="tool-section circuit-section">
               <div className="section-heading"><span>03</span><h3>Contact role</h3></div>
               <p className="microcopy">
@@ -539,7 +540,13 @@ function App() {
           {level.circuit && (
             <section className="tool-section circuit-section">
               <div className="section-heading"><span>02</span><h3>Copper circuit</h3></div>
-              <p className="microcopy">{terrainProcesses.includes('tungsten') ? 'Tungsten may be deposited on any patterned tile. Only a deposit on flush copper becomes a working silver pin; elsewhere it stays visible, costs material, and is electrically inactive.' : 'Paint → Etch → Fill Copper. The supplied SRC, IN, OUT and DEST pads work automatically when copper reaches them; no tungsten is required.'} Copper joins by shared edges.</p>
+              <p className="microcopy">{terrainProcesses.includes('tungsten')
+                ? level.circuit?.manualPinRoles
+                  ? 'Pattern the supplied copper contact tile, Deposit Tungsten, then set that contact to Drive before sending a bit.'
+                  : 'Tungsten may be deposited on any patterned tile. Only a deposit on flush copper becomes a working silver pin; elsewhere it stays visible, costs material, and is electrically inactive.'
+                : level.circuit?.manualPinRoles
+                  ? 'A tungsten Drive contact is supplied. Fabricate copper from it to the gate input; IN, OUT and DEST pads are prefabricated.'
+                  : 'Paint → Etch → Fill Copper. Supplied circuit pads work automatically when copper reaches them; no tungsten is required.'} Copper joins by shared edges.</p>
               {connections.length === 0 && <p className="microcopy">No working wire pins yet. Deposit tungsten on flush copper beneath a ? marker; deposits on silicon or raised material will not conduct.</p>}
               {connections.map((port) => (
                 <div className={`circuit-connection ${port.ready ? 'connected' : ''}`} key={port.id}>

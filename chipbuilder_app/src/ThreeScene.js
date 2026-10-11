@@ -2,7 +2,7 @@ import React, { useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { packetPosition } from './circuit.js';
 import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, TILE_WIDTH, TILE_DEPTH, terrainCell } from './terrain.js';
-import { canFabricateCell, circuitConnections, circuitPorts, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition } from './gameRules.js';
+import { canFabricateCell, circuitConnections, circuitPorts, GATE_INPUT_INTERACTION_RADIUS, gateFootprint, gateInputPosition, gateOutputPosition, usesManualPinRoles } from './gameRules.js';
 
 const MOVE_SPEED = 3.15;
 const DEST_COLOR = new THREE.Color(0xffd16c);
@@ -343,7 +343,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
-      const roleContact = level.sandbox
+      const roleContact = usesManualPinRoles(level)
         ? raycaster.intersectObjects(contactTargets, false).find((hit) => {
           const { col, row } = hit.object.userData;
           const cell = gameRef.current.terrain?.[row]?.[col];
@@ -380,7 +380,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       const bounds = renderer.domElement.getBoundingClientRect();
       pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
-      if (level.sandbox) {
+      if (usesManualPinRoles(level)) {
         const contactHit = raycaster.intersectObjects(contactTargets, false).find((hit) => {
           const { col, row } = hit.object.userData;
           const cell = gameRef.current.terrain?.[row]?.[col];
@@ -421,7 +421,7 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
     const animate = () => {
       animationFrame = requestAnimationFrame(animate);
       const delta = Math.min(clock.getDelta(), 0.05);
-      if (level.circuit || level.sandbox) tickRef.current?.(delta);
+      if (level.circuit || level.sandbox || level.gates.some((gate) => gate.inputs?.length)) tickRef.current?.(delta);
       let x = Number(keys.has('d')) - Number(keys.has('a'));
       let y = Number(keys.has('w')) - Number(keys.has('s'));
       if (x || y) { const length = Math.hypot(x, y); moveRef.current({ x: x / length * MOVE_SPEED * delta, y: y / length * MOVE_SPEED * delta }); }
