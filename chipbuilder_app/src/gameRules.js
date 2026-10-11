@@ -50,9 +50,11 @@ export function applyGateToCargo(gateType, cargo) {
   return cargo.map((item) => ({ ...item, value: transform(item.value) }));
 }
 
-export function placeSandboxGate(level, state, type, position) {
+export function sandboxGatePlacement(level, state, type, position) {
   const blueprint = SANDBOX_GATE_BLUEPRINTS[type];
-  if (!level.sandbox || state.status !== 'playing' || !blueprint || !position) return state;
+  if (!level.sandbox || state.status !== 'playing' || !blueprint || !position) {
+    return { valid: false, gate: null, message: 'Choose a logic gate and move the pointer over the wafer.' };
+  }
 
   const sequence = state.nextGateId || 1;
   const snapped = cellPosition(terrainCell(position.x, position.y));
@@ -70,7 +72,11 @@ export function placeSandboxGate(level, state, type, position) {
     || gate.y - height / 2 - portMargin < -4.15
     || gate.y + height / 2 + portMargin > 4.15;
   if (outsideWafer) {
-    return { ...state, message: `Move the ${type} gate farther inside the wafer so its body and ports fit.` };
+    return {
+      valid: false,
+      gate,
+      message: `Move the ${type} gate farther inside the wafer so its body and ports fit.`,
+    };
   }
 
   const existing = [...(level.gates || []), ...(state.placedGates || [])];
@@ -80,9 +86,24 @@ export function placeSandboxGate(level, state, type, position) {
       && Math.abs(gate.y - other.y) < (height + otherSize.height) / 2 + 0.35;
   });
   if (overlaps) {
-    return { ...state, message: `That spot overlaps another gate. Drop the ${type} gate somewhere else.` };
+    return {
+      valid: false,
+      gate,
+      message: `That spot overlaps another gate. Move the ${type} gate somewhere else.`,
+    };
   }
 
+  return { valid: true, gate, message: '' };
+}
+
+export function placeSandboxGate(level, state, type, position) {
+  const placement = sandboxGatePlacement(level, state, type, position);
+  if (!placement.valid || !placement.gate) {
+    return placement.message ? { ...state, message: placement.message } : state;
+  }
+
+  const gate = placement.gate;
+  const sequence = state.nextGateId || 1;
   return {
     ...state,
     placedGates: [...(state.placedGates || []), gate],
