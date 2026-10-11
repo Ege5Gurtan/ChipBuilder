@@ -814,17 +814,15 @@ function wireDropEndpoints(net, state, position) {
 }
 
 function sandboxRoleEndpoints(net, state) {
-  const pins = net.ports.filter((port) => port.kind === 'pin');
-  const drives = pins.filter((port) => state.circuit.pinRoles?.[port.id] === 'drive');
+  const drives = net.ports.filter((port) => port.kind === 'pin' && state.circuit.pinRoles?.[port.id] === 'drive');
   if (drives.length !== 1) return null;
 
-  const gateReceivers = net.receivers.filter((port) => port.kind === 'gate' && receiverAvailable(state, port));
-  if (gateReceivers.length === 1) return { entry: drives[0], receiver: gateReceivers[0] };
-  if (gateReceivers.length > 1) return null;
-
-  const receives = pins.filter((port) => state.circuit.pinRoles?.[port.id] === 'receive');
-  if (receives.length !== 1 || !receiverAvailable(state, receives[0])) return null;
-  return { entry: drives[0], receiver: receives[0] };
+  const receivers = net.receivers.filter((port) => (
+    (port.kind === 'gate' || (port.kind === 'pin' && state.circuit.pinRoles?.[port.id] === 'receive'))
+    && receiverAvailable(state, port)
+  ));
+  if (receivers.length !== 1) return null;
+  return { entry: drives[0], receiver: receivers[0] };
 }
 
 function sandboxPacketForBit(level, state, bit, position) {
