@@ -50,6 +50,12 @@ function App() {
   const connections = activeLevel.circuit ? circuitConnections(activeLevel, game) : [];
   const sandboxPins = level.sandbox ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
   const selectedContactPin = sandboxPins.find((pin) => pin.id === selectedContactPinId) || null;
+  const selectedContactSignal = selectedContactPin
+    ? game.circuit.sources[selectedContactPin.id]
+      || game.circuit.pinOutputs[selectedContactPin.id]
+      || game.circuit.packets.find((packet) => packet.driverId === selectedContactPin.id || packet.receiver.id === selectedContactPin.id)?.bit
+      || null
+    : null;
   const flashedIds = game.gateEvent?.ids || [];
 
   const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
@@ -489,11 +495,14 @@ function App() {
                     <p className="microcopy">
                       Role: {selectedContactPin.pinRole === 'drive' ? 'Drive' : selectedContactPin.pinRole === 'receive' ? 'Receive' : 'not set'}
                     </p>
+                    <p className="microcopy">
+                      Signal: {selectedContactSignal ? `${selectedContactSignal.value} (${selectedContactSignal.value === 1 ? 'High' : 'Low'})` : 'idle'}
+                    </p>
                   </div>
-                  <button onClick={() => chooseContactRole('drive')} disabled={Boolean(game.circuit.packets.length || game.circuit.pinOutputs[selectedContactPin.id])}>
+                  <button onClick={() => chooseContactRole('drive')} disabled={Boolean(selectedContactSignal)}>
                     <span>Drive</span><small>Sends bits onto copper</small>
                   </button>
-                  <button onClick={() => chooseContactRole('receive')} disabled={Boolean(game.circuit.packets.length || game.circuit.pinOutputs[selectedContactPin.id])}>
+                  <button onClick={() => chooseContactRole('receive')} disabled={Boolean(selectedContactSignal)}>
                     <span>Receive</span><small>Accepts incoming bits</small>
                   </button>
                   <p className="microcopy">
