@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, reorderCargo, SANDBOX_GATE_TYPES, setPinVoltage, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -27,7 +27,7 @@ function App() {
   const [levelIndex, setLevelIndex] = useState(0);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
-  const [selectedVoltagePinId, setSelectedVoltagePinId] = useState(null);
+  const [selectedContactPinId, setSelectedContactPinId] = useState(null);
   const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
   const [gateDragType, setGateDragType] = useState(null);
@@ -48,15 +48,15 @@ function App() {
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
   const socketGates = activeLevel.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
   const connections = activeLevel.circuit ? circuitConnections(activeLevel, game) : [];
-  const voltagePins = level.sandbox ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
-  const selectedVoltagePin = voltagePins.find((pin) => pin.id === selectedVoltagePinId) || null;
+  const sandboxPins = level.sandbox ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
+  const selectedContactPin = sandboxPins.find((pin) => pin.id === selectedContactPinId) || null;
   const flashedIds = game.gateEvent?.ids || [];
 
   const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
 
   const resetUi = () => {
     setSelectedCargoId(null);
-    setSelectedVoltagePinId(null);
+    setSelectedContactPinId(null);
     setCmpHeight(1);
     setGateDragType(null);
     pressRef.current = null;
@@ -126,18 +126,18 @@ function App() {
 
   const socketAt = (x, y) => sceneRef.current?.gateSocketAtClientPoint(x, y) || null;
 
-  const interactWithVoltageContact = (pinId) => {
+  const interactWithContact = (pinId) => {
     if (!level.sandbox) return;
-    setSelectedVoltagePinId(pinId);
+    setSelectedContactPinId(pinId);
     setGame((current) => ({
       ...current,
-      message: 'Tungsten contact selected. Choose High voltage or Low voltage in the side panel.',
+      message: 'Tungsten contact selected. Choose whether it Drives or Receives bits in the side panel.',
     }));
   };
 
-  const chooseVoltage = (voltage) => {
-    if (!selectedVoltagePinId) return;
-    setGame((current) => setPinVoltage(level, current, selectedVoltagePinId, voltage));
+  const chooseContactRole = (pinRole) => {
+    if (!selectedContactPinId) return;
+    setGame((current) => setPinRole(level, current, selectedContactPinId, pinRole));
   };
 
   const interactWithGateSocket = (gateId, inputId) => {
@@ -382,7 +382,7 @@ function App() {
             onTick={tickCircuit}
             onPaint={paintTerrain}
             onGateSocketClick={interactWithGateSocket}
-            onVoltageContactClick={interactWithVoltageContact}
+            onContactClick={interactWithContact}
             hoveredSocket={drag?.socket || null}
             interactingCargo={Boolean(selectedId)}
             allowLithography={allowLithography}
@@ -478,28 +478,30 @@ function App() {
 
           {level.sandbox && (
             <section className="tool-section circuit-section">
-              <div className="section-heading"><span>03</span><h3>Contact voltage</h3></div>
+              <div className="section-heading"><span>03</span><h3>Contact role</h3></div>
               <p className="microcopy">
-                Deposit tungsten on copper, then click a tungsten contact on the wafer. Give one connected contact High voltage and another Low voltage.
+                Deposit tungsten on copper, then click a tungsten contact. Set its direction role independently from the bit value: Drive sends, Receive accepts.
               </p>
-              {selectedVoltagePin ? (
+              {selectedContactPin ? (
                 <>
                   <div className="circuit-connection connected">
-                    <strong>{selectedVoltagePin.label}</strong>
+                    <strong>{selectedContactPin.label}</strong>
                     <p className="microcopy">
-                      Voltage: {selectedVoltagePin.voltage === 'high' ? 'High' : selectedVoltagePin.voltage === 'low' ? 'Low' : 'not set'}
+                      Role: {selectedContactPin.pinRole === 'drive' ? 'Drive' : selectedContactPin.pinRole === 'receive' ? 'Receive' : 'not set'}
                     </p>
                   </div>
-                  <button onClick={() => chooseVoltage('high')} disabled={Boolean(game.circuit.packets.length)}>
-                    <span>High voltage</span><small>Bit source</small>
+                  <button onClick={() => chooseContactRole('drive')} disabled={Boolean(game.circuit.packets.length || game.circuit.pinOutputs[selectedContactPin.id])}>
+                    <span>Drive</span><small>Sends bits onto copper</small>
                   </button>
-                  <button onClick={() => chooseVoltage('low')} disabled={Boolean(game.circuit.packets.length)}>
-                    <span>Low voltage</span><small>Bit destination</small>
+                  <button onClick={() => chooseContactRole('receive')} disabled={Boolean(game.circuit.packets.length || game.circuit.pinOutputs[selectedContactPin.id])}>
+                    <span>Receive</span><small>Accepts incoming bits</small>
                   </button>
-                  <p className="microcopy">Drop the test bit anywhere on the connected copper path. With exactly one High contact and one Low contact, the bit automatically moves toward Low — even if the bit was already on the wire when you set the voltages.</p>
+                  <p className="microcopy">
+                    Direction is Drive → Receive (or a gate input). A 0 and a 1 follow the same direction; their Low/High signal value is separate from the contact role. Gate A/B are fixed receivers and OUT is a fixed driver.
+                  </p>
                 </>
               ) : (
-                <p className="microcopy">Click a functional tungsten contact to set its voltage.</p>
+                <p className="microcopy">Click a functional tungsten contact to choose Drive or Receive.</p>
               )}
             </section>
           )}
