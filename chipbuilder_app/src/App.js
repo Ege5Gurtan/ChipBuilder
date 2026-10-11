@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { advanceCircuit, circuitConnections, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, setPinVoltage, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -22,6 +22,7 @@ function App() {
   const [levelIndex, setLevelIndex] = useState(0);
   const [game, setGame] = useState(() => createGame(levels[0]));
   const [selectedCargoId, setSelectedCargoId] = useState(null);
+  const [selectedVoltagePinId, setSelectedVoltagePinId] = useState(null);
   const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
@@ -37,12 +38,15 @@ function App() {
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
   const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
   const connections = level.circuit ? circuitConnections(level, game) : [];
+  const voltagePins = level.sandbox ? circuitPorts(level, game).filter((port) => port.kind === 'pin') : [];
+  const selectedVoltagePin = voltagePins.find((pin) => pin.id === selectedVoltagePinId) || null;
   const flashedIds = game.gateEvent?.ids || [];
 
   const updateDrag = (next) => { dragRef.current = next; setDrag(next); };
 
   const resetUi = () => {
     setSelectedCargoId(null);
+    setSelectedVoltagePinId(null);
     setCmpHeight(1);
     pressRef.current = null;
     updateDrag(null);
@@ -110,6 +114,20 @@ function App() {
   };
 
   const socketAt = (x, y) => sceneRef.current?.gateSocketAtClientPoint(x, y) || null;
+
+  const interactWithVoltageContact = (pinId) => {
+    if (!level.sandbox) return;
+    setSelectedVoltagePinId(pinId);
+    setGame((current) => ({
+      ...current,
+      message: 'Tungsten contact selected. Choose High voltage or Low voltage in the side panel.',
+    }));
+  };
+
+  const chooseVoltage = (voltage) => {
+    if (!selectedVoltagePinId) return;
+    setGame((current) => setPinVoltage(level, current, selectedVoltagePinId, voltage));
+  };
 
   const interactWithGateSocket = (gateId, inputId) => {
     if (inputId === 'source') {
@@ -322,6 +340,7 @@ function App() {
             onTick={tickCircuit}
             onPaint={paintTerrain}
             onGateSocketClick={interactWithGateSocket}
+            onVoltageContactClick={interactWithVoltageContact}
             hoveredSocket={drag?.socket || null}
             interactingCargo={Boolean(selectedId)}
             allowLithography={allowLithography}
@@ -392,6 +411,34 @@ function App() {
               </div>
             )}
           </section>
+
+          {level.sandbox && (
+            <section className="tool-section circuit-section">
+              <div className="section-heading"><span>02</span><h3>Contact voltage</h3></div>
+              <p className="microcopy">
+                Deposit tungsten on copper, then click a tungsten contact on the wafer. Give one connected contact High voltage and another Low voltage.
+              </p>
+              {selectedVoltagePin ? (
+                <>
+                  <div className="circuit-connection connected">
+                    <strong>{selectedVoltagePin.label}</strong>
+                    <p className="microcopy">
+                      Voltage: {selectedVoltagePin.voltage === 'high' ? 'High' : selectedVoltagePin.voltage === 'low' ? 'Low' : 'not set'}
+                    </p>
+                  </div>
+                  <button onClick={() => chooseVoltage('high')} disabled={Boolean(game.circuit.packets.length)}>
+                    <span>High voltage</span><small>Bit source</small>
+                  </button>
+                  <button onClick={() => chooseVoltage('low')} disabled={Boolean(game.circuit.packets.length)}>
+                    <span>Low voltage</span><small>Bit destination</small>
+                  </button>
+                  <p className="microcopy">Pick up the test bit, stand on the High contact, and press <b>K</b>. If copper connects it to exactly one Low contact, the bit moves High → Low.</p>
+                </>
+              ) : (
+                <p className="microcopy">Click a functional tungsten contact to set its voltage.</p>
+              )}
+            </section>
+          )}
 
           {level.circuit && (
             <section className="tool-section circuit-section">
@@ -471,7 +518,7 @@ function App() {
 
           {game.terrain && (
             <section className="tool-section fabrication-section">
-              <div className="section-heading"><span>02</span><h3>Fabrication</h3></div>
+              <div className="section-heading"><span>{level.sandbox ? '03' : '02'}</span><h3>Fabrication</h3></div>
 
               {allowLithography && (
                 <>

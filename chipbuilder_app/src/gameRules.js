@@ -64,7 +64,7 @@ export function createGame(level) {
     terrainHistory: [],
     circuit: {
       sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [],
-      pinOutputs: {}, pinTransfers: 0,
+      pinOutputs: {}, pinTransfers: 0, pinVoltages: {},
       prebuiltPinCells: circuitPorts(level).map((port) => cellKey(terrainCell(port.x, port.y))),
     },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
@@ -449,6 +449,9 @@ function pushTerrainHistory(state) {
 function reconcilePinTokens(state) {
   const pins = new Set(wirePins(state.terrain).map((pin) => pin.id));
   const sources = { ...state.circuit.sources }, pinOutputs = { ...state.circuit.pinOutputs };
+  const pinVoltages = Object.fromEntries(
+    Object.entries(state.circuit.pinVoltages || {}).filter(([id]) => pins.has(id))
+  );
   const returned = [];
   Object.keys(sources).filter((id) => id.startsWith('pin-') && !pins.has(id)).forEach((id) => {
     if (sources[id]) returned.push(sources[id]);
@@ -458,7 +461,7 @@ function reconcilePinTokens(state) {
     if (pinOutputs[id]) returned.push(pinOutputs[id]);
     delete pinOutputs[id];
   });
-  return { ...state, cargo: [...state.cargo, ...returned], circuit: { ...state.circuit, sources, pinOutputs },
+  return { ...state, cargo: [...state.cargo, ...returned], circuit: { ...state.circuit, sources, pinOutputs, pinVoltages },
     message: returned.length ? `${state.message} Removed pin's bit returned to cargo.` : state.message };
 }
 
@@ -601,8 +604,8 @@ function processTerrain(state, action, cmpHeight) {
 }
 
 export function circuitPorts(level, state) {
-  if (!level.circuit) return [];
-  return [
+  if (!level.circuit && !level.sandbox) return [];
+  const staticPorts = level.circuit ? [
     ...(level.circuit.sources || []).map((source) => ({ ...source, role: 'driver', kind: 'source', label: source.label || 'SRC' })),
     ...level.gates.filter((gate) => gate.wired).flatMap((gate) => [
       ...gate.inputs.map((input) => ({
@@ -612,12 +615,37 @@ export function circuitPorts(level, state) {
       { id: `${gate.id}:out`, role: 'driver', kind: 'gateOutput', gateId: gate.id, label: `${gate.type} OUT`, ...gateOutputPosition(gate) },
     ]),
     { id: 'destination', role: 'receiver', kind: 'destination', label: 'DEST', ...level.destination },
+  ] : [];
+
+  return [
+    ...staticPorts,
     ...wirePins(state?.terrain).map((pin) => {
-      const hint = level.circuit.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
-      const driving = state.circuit.sources[pin.id] || state.circuit.packets.some((packet) => packet.driverId === pin.id);
-      return { ...pin, kind: 'pin', role: driving ? 'driver' : 'receiver', label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
+      const hint = level.circuit?.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
+      const voltage = state?.circuit?.pinVoltages?.[pin.id] || null;
+      const driving = state?.circuit?.sources?.[pin.id] || state?.circuit?.packets?.some((packet) => packet.driverId === pin.id);
+      const role = level.sandbox
+        ? voltage === 'high' ? 'driver' : voltage === 'low' ? 'receiver' : 'neutral'
+        : driving ? 'driver' : 'receiver';
+      return { ...pin, kind: 'pin', role, voltage, label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
     }),
   ];
+}
+
+export function setPinVoltage(level, state, pinId, voltage) {
+  if (!level.sandbox || !['high', 'low'].includes(voltage) || state.status !== 'playing') return state;
+  const pin = wirePins(state.terrain).find((item) => item.id === pinId);
+  if (!pin) return { ...state, message: 'That tungsten contact no longer exists.' };
+  if (state.circuit.packets.some((packet) => packet.driverId === pinId || packet.receiver.id === pinId)) {
+    return { ...state, message: 'Wait for the moving bit to arrive before changing this contact voltage.' };
+  }
+  return {
+    ...state,
+    circuit: {
+      ...state.circuit,
+      pinVoltages: { ...(state.circuit.pinVoltages || {}), [pinId]: voltage },
+    },
+    message: `${pinId} set to ${voltage === 'high' ? 'High' : 'Low'} voltage. A bit on a connected High contact will move toward a Low contact.`,
+  };
 }
 
 function circuitDriverActive(state, port) {
@@ -680,14 +708,28 @@ function wireDropEndpoints(net, state, position) {
   return { entry, receiver };
 }
 
+function sandboxVoltageEndpoints(net, state, position) {
+  const pins = net.ports.filter((port) => port.kind === 'pin');
+  const high = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'high');
+  const low = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'low');
+  if (high.length !== 1 || low.length !== 1) return null;
+
+  const dropCell = terrainCell(position.x, position.y);
+  if (cellKey(dropCell) !== cellKey(high[0])) return null;
+  if (!receiverAvailable(state, low[0])) return null;
+  return { entry: high[0], receiver: low[0] };
+}
+
 function injectDroppedBitOnCopper(level, state, bit, position) {
-  if (!position || !level.circuit || !state.terrain) return null;
+  if (!position || (!level.circuit && !level.sandbox) || !state.terrain) return null;
   const cell = terrainCell(position.x, position.y);
   const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
   if (!net) return null;
-  const endpoints = wireDropEndpoints(net, state, position);
+  const endpoints = level.sandbox
+    ? sandboxVoltageEndpoints(net, state, position)
+    : wireDropEndpoints(net, state, position);
   if (!endpoints) return null;
-  const route = wireRoute(net, position, endpoints.receiver);
+  const route = wireRoute(net, level.sandbox ? endpoints.entry : position, endpoints.receiver);
   if (!route.length) return null;
 
   const packet = {
@@ -703,7 +745,9 @@ function injectDroppedBitOnCopper(level, state, bit, position) {
     cargo: state.cargo.filter((item) => item.id !== bit.id),
     circuit: { ...state.circuit, packets: [...state.circuit.packets, packet] },
     cost: { ...state.cost, energy: state.cost.energy + 1 },
-    message: `Dropped ${bit.value} onto copper. The wire accepted it and is carrying it toward ${endpoints.receiver.label}.`,
+    message: level.sandbox
+      ? `Bit ${bit.value} is moving from the High voltage tungsten contact to the Low voltage contact.`
+      : `Dropped ${bit.value} onto copper. The wire accepted it and is carrying it toward ${endpoints.receiver.label}.`,
   };
 }
 
@@ -796,7 +840,10 @@ function collectPinOutputs(level, state) {
     if (!bit || Math.hypot(current.player.x - pin.x, current.player.y - pin.y) > PICKUP_RADIUS) return current;
     const pinOutputs = { ...current.circuit.pinOutputs }; delete pinOutputs[pin.id];
     return { ...current, cargo: [...current.cargo, bit], circuit: { ...current.circuit, pinOutputs },
-      cost: { ...current.cost, energy: current.cost.energy + 1 }, message: `Collected tungsten pin output ${bit.value}. Carry it to DEST or send it into another wire.` };
+      cost: { ...current.cost, energy: current.cost.energy + 1 },
+      message: level.sandbox
+        ? `Collected bit ${bit.value} from the Low voltage tungsten contact.`
+        : `Collected tungsten pin output ${bit.value}. Carry it to DEST or send it into another wire.` };
   }, state);
 }
 
@@ -826,7 +873,9 @@ function receiveCircuitBit(level, state, packet) {
   const { receiver, bit } = packet;
   if (receiver.kind === 'pin') return { ...state,
     circuit: { ...state.circuit, pinOutputs: { ...state.circuit.pinOutputs, [receiver.id]: bit }, pinTransfers: state.circuit.pinTransfers + 1 },
-    message: `${receiver.label} received ${bit.value}. Walk over this tungsten pin to collect it.` };
+    message: level.sandbox
+      ? `Bit ${bit.value} reached the Low voltage tungsten contact.`
+      : `${receiver.label} received ${bit.value}. Walk over this tungsten pin to collect it.` };
 
   if (receiver.kind === 'gate') {
     return depositCargo(level, { ...state, cargo: [...state.cargo, bit] }, bit.id, { ...receiver, viaWire: true });
@@ -855,7 +904,7 @@ function receiveCircuitBit(level, state, packet) {
 
 // Called independently of carrier movement. State owns transport; Three.js only draws packets.
 export function advanceCircuit(level, state, delta) {
-  if (!level.circuit || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
+  if ((!level.circuit && !level.sandbox) || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
   const pendingDriver = Object.values(state.circuit.sources).some(Boolean)
     || level.gates.some((gate) => gate.wired && state.gateState[gate.id].pendingOutput);
   if (!state.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, state);
