@@ -256,8 +256,8 @@ export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
 
-  // K is always a free wafer drop. Proximity to a pin or gate must never hijack the action.
-  // Players use click/drag (or the circuit-panel button) when they explicitly want to load a port.
+  // K always drops the bit physically. If that drop lands on a simple two-port copper net,
+  // the copper accepts the bit immediately and transports it toward the valid opposite socket.
   const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
   const spot = directions
     .map(([dx, dy]) => {
@@ -265,6 +265,15 @@ export function dropCargoBit(level, state, cargoId) {
       return clampToWafer({ x: state.player.x + dx / length * DROP_DISTANCE, y: state.player.y + dy / length * DROP_DISTANCE });
     })
     .find((position) => isWalkable(level, state, position)) || { ...state.player };
+
+  const playerCell = terrainCell(state.player.x, state.player.y);
+  const spotCell = terrainCell(spot.x, spot.y);
+  const playerOnCopper = state.terrain?.[playerCell.row]?.[playerCell.col]?.material === 'copper'
+    && state.terrain[playerCell.row][playerCell.col].height === BASE_HEIGHT;
+  const spotOnCopper = state.terrain?.[spotCell.row]?.[spotCell.col]?.material === 'copper'
+    && state.terrain[spotCell.row][spotCell.col].height === BASE_HEIGHT;
+  const injected = injectDroppedBitOnCopper(level, state, item, playerOnCopper ? state.player : spotOnCopper ? spot : null);
+  if (injected) return injected;
 
   return {
     ...state,
@@ -637,6 +646,57 @@ function circuitNets(level, state) {
         && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, driver.gateId))),
     };
   });
+}
+
+function wireDropEndpoints(net, state, position) {
+  if (net.ports.length !== 2 || net.conflict || net.cycle || net.activeDrivers.length) return null;
+  const [a, b] = net.ports;
+  const sourceOnly = (port) => ['source', 'gateOutput'].includes(port.kind);
+  const receiverOnly = (port) => ['gate', 'destination'].includes(port.kind);
+  const pin = (port) => port.kind === 'pin';
+  let entry = null, receiver = null;
+
+  if (sourceOnly(a) && (receiverOnly(b) || pin(b))) { entry = a; receiver = b; }
+  else if (sourceOnly(b) && (receiverOnly(a) || pin(a))) { entry = b; receiver = a; }
+  else if (pin(a) && receiverOnly(b)) { entry = a; receiver = b; }
+  else if (pin(b) && receiverOnly(a)) { entry = b; receiver = a; }
+  else if (pin(a) && pin(b)) {
+    const distanceA = Math.hypot(position.x - a.x, position.y - a.y);
+    const distanceB = Math.hypot(position.x - b.x, position.y - b.y);
+    entry = distanceA <= distanceB ? a : b;
+    receiver = entry.id === a.id ? b : a;
+  }
+
+  if (!entry || !receiver || !receiverAvailable(state, receiver)) return null;
+  if (entry.kind === 'pin' && state.circuit.pinOutputs[entry.id]) return null;
+  return { entry, receiver };
+}
+
+function injectDroppedBitOnCopper(level, state, bit, position) {
+  if (!position || !level.circuit || !state.terrain) return null;
+  const cell = terrainCell(position.x, position.y);
+  const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
+  if (!net) return null;
+  const endpoints = wireDropEndpoints(net, state, position);
+  if (!endpoints) return null;
+  const route = wireRoute(net, position, endpoints.receiver);
+  if (!route.length) return null;
+
+  const packet = {
+    id: `${bit.id}->${endpoints.receiver.id}`,
+    bit: { id: `${bit.id}->${endpoints.receiver.id}`, value: bit.value },
+    driverId: endpoints.entry.id,
+    receiver: endpoints.receiver,
+    route,
+    progress: 0,
+  };
+  return {
+    ...state,
+    cargo: state.cargo.filter((item) => item.id !== bit.id),
+    circuit: { ...state.circuit, packets: [...state.circuit.packets, packet] },
+    cost: { ...state.cost, energy: state.cost.energy + 1 },
+    message: `Dropped ${bit.value} onto copper. The wire accepted it and is carrying it toward ${endpoints.receiver.label}.`,
+  };
 }
 
 export function circuitConnections(level, state) {
