@@ -269,7 +269,7 @@ function App() {
 
       <div className={`game-layout ${level.circuit ? 'circuit-layout' : ''}`}>
         <aside className="mission-panel">
-          <p className="level-number">LEVEL {level.number}</p>
+          <p className="level-number">{level.sandbox ? 'SANDBOX' : `LEVEL ${level.number}`}</p>
           <h2>{level.title}</h2>
           <div className="goal-block">
             <span>Goal</span>
@@ -578,6 +578,7 @@ function App() {
                 ? 'Carrier at DEST. Press Enter to submit cargo.'
                 : 'Drive to DEST, then press Enter.'}
               {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
+              {level.sandbox && ' A correct sandbox signal resets the target instead of ending the level.'}
             </p>
           </section>
         </aside>

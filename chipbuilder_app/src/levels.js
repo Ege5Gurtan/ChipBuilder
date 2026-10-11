@@ -194,6 +194,52 @@ const levels = [
     circuit: { sources: [], requirePinTransfer: true, pinHints: [{ x: -4.333, y: -0.375, label: 'IN' }, { x: 4.333, y: -0.375, label: 'OUT' }] },
     fabrication: { terrain: { regions: [{ rows: [5, 5], cols: [2, 15], material: 'copper' }] }, allowedProcesses: ['lithography', 'tungsten'] },
   },
+  {
+    id: 'process-sandbox',
+    number: 'SB',
+    title: 'Process Sandbox',
+    sandbox: true,
+    goal: 'Experiment freely with every fabrication process, logic gate, copper route, pin, and signal interaction. This level never ends.',
+    lesson: 'All process operations are unlocked. Normal process rules still apply and costs still accumulate, so you can test realistic cause and effect. Restart restores the original sandbox wafer at any time.',
+    target: '10',
+    start: { x: -5.2, y: -3.45 },
+    destination: { x: 4.333, y: -0.375 },
+    pickups: [
+      { id: 'sandbox-zero-a', value: 0, x: -4.65, y: -3.35 },
+      { id: 'sandbox-one-a', value: 1, x: -3.85, y: -3.35 },
+      { id: 'sandbox-one-b', value: 1, x: -4.65, y: -2.45 },
+      { id: 'sandbox-zero-b', value: 0, x: -3.85, y: -2.45 },
+      { id: 'sandbox-zero-c', value: 0, x: 2.7, y: -3.25 },
+      { id: 'sandbox-one-c', value: 1, x: 3.45, y: -3.25 },
+      { id: 'sandbox-one-d', value: 1, x: 2.7, y: -2.35 },
+      { id: 'sandbox-zero-d', value: 0, x: 3.45, y: -2.35 },
+    ],
+    obstacles: [],
+    gates: [
+      { id: 'sandbox-wired-not', type: 'NOT', wired: true, x: 0, y: -0.375, inputs: [{ id: 'in', label: 'IN' }] },
+      { id: 'sandbox-and', type: 'AND', x: -3.6, y: 2.1, inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+      { id: 'sandbox-or', type: 'OR', x: -0.7, y: 2.1, inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+      { id: 'sandbox-pass-not', type: 'NOT', x: 3.1, y: 2.1 },
+    ],
+    circuit: {
+      sources: [{ id: 'sandbox-source', label: 'SRC', x: -4.333, y: -0.375 }],
+      pinHints: [
+        { x: -0.333, y: 3.375, label: 'PIN A' },
+        { x: 2.333, y: 3.375, label: 'PIN B' },
+      ],
+    },
+    fabrication: {
+      terrain: {
+        regions: [
+          { rows: [0, 2], cols: [5, 6], height: 2, material: 'oxide' },
+          { rows: [0, 2], cols: [9, 10], height: 0, material: 'silicon' },
+          { rows: [0, 2], cols: [14, 15], height: 3, material: 'deposit' },
+          { rows: [10, 10], cols: [8, 12], height: 1, material: 'copper' },
+        ],
+      },
+      allowedProcesses: ['lithography', 'etch', 'deposit', 'copper', 'tungsten', 'cmp'],
+    },
+  },
 ];
 
 export default levels;

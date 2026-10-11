@@ -69,7 +69,9 @@ export function createGame(level) {
     },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
     status: 'playing',
-    message: 'Carrier online. Follow the goal and deliver the exact target signal.',
+    message: level.sandbox
+      ? 'Sandbox online. Every process is unlocked; experiment freely and restart whenever you want a clean wafer.'
+      : 'Carrier online. Follow the goal and deliver the exact target signal.',
   };
 }
 
@@ -236,19 +238,25 @@ export function attemptSignalDelivery(level, state) {
   ));
   const cargo = state.cargo.filter((item) => !acceptedIds.has(item.id));
   const complete = targetSlots.every((slot) => slot.delivered);
+  const sandboxComplete = complete && level.sandbox;
+  const nextTargetSlots = sandboxComplete
+    ? targetSlots.map((slot) => ({ ...slot, delivered: false }))
+    : targetSlots;
   const rejected = Math.min(state.cargo.length, openSlots.length) - acceptedIds.size;
   const signal = targetSlots.map((slot) => (slot.delivered ? slot.value : '_')).join(' ');
 
   return {
     ...state,
     cargo,
-    targetSlots,
+    targetSlots: nextTargetSlots,
     feedback: { kind: complete || !rejected ? 'accept' : 'partial', seq },
     cost: { ...state.cost, energy: state.cost.energy + acceptedIds.size },
-    status: complete ? 'success' : state.status,
-    message: complete
-      ? `Signal ${level.target} complete. Every target slot received the correct bit.`
-      : `Accepted ${acceptedIds.size} bit${acceptedIds.size === 1 ? '' : 's'}. Signal: ${signal}.${rejected ? ` ${rejected} mismatching bit${rejected === 1 ? '' : 's'} stayed in cargo.` : ''}`,
+    status: complete && !level.sandbox ? 'success' : state.status,
+    message: sandboxComplete
+      ? `Sandbox check passed: signal ${level.target} is correct. Target reset so you can keep experimenting.`
+      : complete
+        ? `Signal ${level.target} complete. Every target slot received the correct bit.`
+        : `Accepted ${acceptedIds.size} bit${acceptedIds.size === 1 ? '' : 's'}. Signal: ${signal}.${rejected ? ` ${rejected} mismatching bit${rejected === 1 ? '' : 's'} stayed in cargo.` : ''}`,
   };
 }
 
@@ -827,16 +835,21 @@ function receiveCircuitBit(level, state, packet) {
   const accepted = index >= 0 && state.targetSlots[index].value === bit.value;
   const targetSlots = state.targetSlots.map((slot, i) => i === index && accepted ? { ...slot, delivered: true } : slot);
   const complete = targetSlots.every((slot) => slot.delivered);
+  const sandboxComplete = complete && level.sandbox;
+  const nextTargetSlots = sandboxComplete
+    ? targetSlots.map((slot) => ({ ...slot, delivered: false }))
+    : targetSlots;
   return {
     ...state,
-    targetSlots,
+    targetSlots: nextTargetSlots,
     cargo: accepted ? state.cargo : [...state.cargo, bit],
-    status: complete ? 'success' : state.status,
+    status: complete && !level.sandbox ? 'success' : state.status,
     feedback: { kind: accepted ? 'accept' : 'reject', seq: (state.feedback?.seq || 0) + 1 },
     cost: { ...state.cost, energy: state.cost.energy + 1 },
-    message: complete ? `Signal ${level.target} delivered through copper. Route complete.`
-      : accepted ? `DEST accepted ${bit.value}. Complete the remaining target slots.`
-        : `DEST expected ${state.targetSlots[index]?.value ?? 'no more bits'}, received ${bit.value}. Rejected bit returned to cargo.`,
+    message: sandboxComplete ? `Sandbox check passed: signal ${level.target} arrived through copper. Target reset for another test.`
+      : complete ? `Signal ${level.target} delivered through copper. Route complete.`
+        : accepted ? `DEST accepted ${bit.value}. Complete the remaining target slots.`
+          : `DEST expected ${state.targetSlots[index]?.value ?? 'no more bits'}, received ${bit.value}. Rejected bit returned to cargo.`,
   };
 }
 
