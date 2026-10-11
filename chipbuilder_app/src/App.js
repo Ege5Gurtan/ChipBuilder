@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, sandboxGatePlacement, reorderCargo, SANDBOX_GATE_TYPES, setPinRole, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
@@ -30,7 +30,8 @@ function App() {
   const [selectedContactPinId, setSelectedContactPinId] = useState(null);
   const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
-  const [gateDragType, setGateDragType] = useState(null);
+  const [gatePlacementType, setGatePlacementType] = useState(null);
+  const [gatePlacementPoint, setGatePlacementPoint] = useState(null);
   const dragRef = useRef(null);
   const pressRef = useRef(null);
   const suppressClick = useRef(false);
@@ -64,7 +65,8 @@ function App() {
     setSelectedCargoId(null);
     setSelectedContactPinId(null);
     setCmpHeight(1);
-    setGateDragType(null);
+    setGatePlacementType(null);
+    setGatePlacementPoint(null);
     pressRef.current = null;
     updateDrag(null);
   };
@@ -236,32 +238,44 @@ function App() {
     setGame((current) => applyTerrainProcess(current, action, cmpHeight));
   };
 
-  const gateDragStart = (event, type) => {
-    if (!level.sandbox || game.status !== 'playing') return;
-    setGateDragType(type);
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData('application/x-semicon-gate', type);
-    event.dataTransfer.setData('text/plain', type);
+  const beginGatePlacement = (type) => {
+    if (!level.sandbox || game.status !== 'playing' || !SANDBOX_GATE_TYPES.includes(type)) return;
+    setGatePlacementType(type);
+    setGatePlacementPoint(null);
+    setGame((current) => ({
+      ...current,
+      message: `${type} placement armed. Move over the wafer, left-click to place, or right-click to cancel.`,
+    }));
   };
 
-  const gateDragOverWafer = (event) => {
-    if (!level.sandbox) return;
-    if (!gateDragType && !event.dataTransfer.types.includes('application/x-semicon-gate')) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
+  const previewGatePlacement = (point) => {
+    setGatePlacementPoint(point);
   };
 
-  const dropGateOnWafer = (event) => {
-    if (!level.sandbox) return;
-    const type = event.dataTransfer.getData('application/x-semicon-gate') || gateDragType;
-    if (!SANDBOX_GATE_TYPES.includes(type)) return;
-    event.preventDefault();
-    const point = sceneRef.current?.waferPointAtClientPoint(event.clientX, event.clientY) || null;
-    setGame((current) => point
-      ? placeSandboxGate(level, current, type, point)
-      : { ...current, message: 'Drop logic gates directly on the wafer surface.' });
-    setGateDragType(null);
+  const cancelGatePlacement = () => {
+    if (!gatePlacementType) return;
+    setGatePlacementType(null);
+    setGatePlacementPoint(null);
+    setGame((current) => ({ ...current, message: 'Logic gate placement cancelled.' }));
   };
+
+  const confirmGatePlacement = (point) => {
+    const type = gatePlacementType;
+    if (!type || !point) return;
+    const placement = sandboxGatePlacement(level, game, type, point);
+    if (!placement.valid) {
+      setGatePlacementPoint(point);
+      setGame((current) => ({ ...current, message: placement.message }));
+      return;
+    }
+    setGame((current) => placeSandboxGate(level, current, type, point));
+    setGatePlacementType(null);
+    setGatePlacementPoint(null);
+  };
+
+  const gatePlacementPreview = gatePlacementType && gatePlacementPoint
+    ? sandboxGatePlacement(level, game, gatePlacementType, gatePlacementPoint)
+    : null;
 
   const nextLevel = () => {
     const nextIndex = Math.min(levelIndex + 1, levels.length - 1);
@@ -375,11 +389,7 @@ function App() {
           </div>
         </aside>
 
-        <section
-          className={`wafer-panel ${gateDragType ? 'gate-drop-mode' : ''}`}
-          onDragOver={gateDragOverWafer}
-          onDrop={dropGateOnWafer}
-        >
+        <section className={`wafer-panel ${gatePlacementType ? 'gate-placement-mode' : ''}`}>
           <ThreeScene
             ref={sceneRef}
             level={activeLevel}
@@ -392,8 +402,19 @@ function App() {
             hoveredSocket={drag?.socket || null}
             interactingCargo={Boolean(selectedId)}
             allowLithography={allowLithography}
+            placementGateType={gatePlacementType}
+            gatePlacement={gatePlacementPreview}
+            onGatePlacementHover={previewGatePlacement}
+            onGatePlacementConfirm={confirmGatePlacement}
+            onGatePlacementCancel={cancelGatePlacement}
           />
-          {gateDragType && <div className="gate-drop-hint" aria-hidden="true">Drop {gateDragType} gate on the wafer</div>}
+          {gatePlacementType && (
+            <div className={`gate-placement-hint ${gatePlacementPreview && !gatePlacementPreview.valid ? 'invalid' : ''}`} aria-hidden="true">
+              {gatePlacementPreview && !gatePlacementPreview.valid
+                ? gatePlacementPreview.message
+                : `Place ${gatePlacementType}: left-click confirm · right-click cancel`}
+            </div>
+          )}
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
             <p>{game.message}</p>
@@ -464,15 +485,15 @@ function App() {
           {level.sandbox && (
             <section className="tool-section gate-palette-section">
               <div className="section-heading"><span>02</span><h3>Logic gates</h3></div>
-              <p className="microcopy">Drag a gate onto the wafer. Gates snap to a small placement grid and cannot overlap another gate.</p>
+              <p className="microcopy">Click a gate to arm placement. Move the ghost preview over the tile grid, left-click to place it, or right-click to cancel.</p>
               <div className="gate-palette" aria-label="Sandbox logic gate palette">
                 {SANDBOX_GATE_TYPES.map((type) => (
                   <button
                     key={type}
-                    className="gate-palette-button"
-                    draggable={game.status === 'playing'}
-                    onDragStart={(event) => gateDragStart(event, type)}
-                    onDragEnd={() => setGateDragType(null)}
+                    className={`gate-palette-button ${gatePlacementType === type ? 'selected' : ''}`}
+                    onClick={() => beginGatePlacement(type)}
+                    aria-pressed={gatePlacementType === type}
+                    disabled={game.status !== 'playing'}
                   >
                     <strong>{type}</strong>
                     <small>{GATE_DESCRIPTIONS[type]}</small>
