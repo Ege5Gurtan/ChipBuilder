@@ -81,6 +81,20 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       if (gameRef.current.gateState[gateId]?.pendingOutput) return null;
       return socket;
     },
+    waferPointAtClientPoint(clientX, clientY) {
+      const refs = visuals.current;
+      if (!refs?.tiles?.length) return null;
+      const bounds = refs.renderer.domElement.getBoundingClientRect();
+      if (clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom) return null;
+      const pointer = new THREE.Vector2(
+        (clientX - bounds.left) / bounds.width * 2 - 1,
+        -(clientY - bounds.top) / bounds.height * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(pointer, refs.camera);
+      const hit = raycaster.intersectObjects(refs.tiles.map(({ mesh }) => mesh), false)[0];
+      return hit ? { x: hit.point.x, y: -hit.point.z } : null;
+    },
   }), [level]);
 
   useEffect(() => {
