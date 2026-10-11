@@ -1,9 +1,76 @@
 import levels from './levels.js';
-import { advanceCircuit, applyTerrainProcess, circuitPorts, createGame, dropCargoBit, fabricateCell, gateInputPosition, gateOutputPosition, placeSandboxGate, setPinRole } from './gameRules.js';
+import { advanceCircuit, applyTerrainProcess, circuitConnections, circuitPorts, createGame, depositCargo, dropCargoBit, fabricateCell, gateInputPosition, gateOutputPosition, placeSandboxGate, setPinRole } from './gameRules.js';
 import { cellPosition } from './circuit.js';
-import { terrainCell } from './terrain.js';
+import { BASE_HEIGHT, terrainCell } from './terrain.js';
 
 const sandbox = levels.find((item) => item.sandbox);
+
+function pathCells(from, to, viaRow = null) {
+  const cells = [];
+  let col = from.col;
+  let row = from.row;
+  const add = () => cells.push({ col, row });
+  add();
+  const moveRow = (target) => {
+    while (row !== target) {
+      row += Math.sign(target - row);
+      add();
+    }
+  };
+  const moveCol = (target) => {
+    while (col !== target) {
+      col += Math.sign(target - col);
+      add();
+    }
+  };
+  if (viaRow !== null) {
+    moveRow(viaRow);
+    moveCol(to.col);
+    moveRow(to.row);
+  } else {
+    moveCol(to.col);
+    moveRow(to.row);
+  }
+  return cells;
+}
+
+function addCopper(state, cells) {
+  const terrain = state.terrain.map((row) => row.map((cell) => ({ ...cell })));
+  cells.forEach(({ col, row }) => {
+    terrain[row][col] = {
+      ...terrain[row][col],
+      height: BASE_HEIGHT,
+      material: 'copper',
+      contact: null,
+      masked: false,
+    };
+  });
+  return { ...state, terrain };
+}
+
+function buildNotFeedback(count) {
+  const xs = count === 3 ? [-3, 0, 3] : [-2, 2];
+  let state = createGame(sandbox);
+  xs.forEach((x) => {
+    state = placeSandboxGate(sandbox, state, 'NOT', { x, y: 0 });
+  });
+  const gates = state.placedGates;
+  const activeLevel = { ...sandbox, gates: [...(sandbox.gates || []), ...gates] };
+  const cells = [];
+  for (let index = 0; index < gates.length - 1; index += 1) {
+    const from = terrainCell(gateOutputPosition(gates[index]).x, gateOutputPosition(gates[index]).y);
+    const to = terrainCell(gateInputPosition(gates[index + 1], 'in').x, gateInputPosition(gates[index + 1], 'in').y);
+    cells.push(...pathCells(from, to));
+  }
+  const lastOutput = gateOutputPosition(gates[gates.length - 1]);
+  const firstInput = gateInputPosition(gates[0], 'in');
+  const from = terrainCell(lastOutput.x, lastOutput.y);
+  const to = terrainCell(firstInput.x, firstInput.y);
+  const viaRow = Math.min(10, Math.max(from.row, to.row) + 4);
+  cells.push(...pathCells(from, to, viaRow));
+  state = addCopper(state, cells);
+  return { state, activeLevel, gates };
+}
 
 
 test('sandbox NOT uses one input pin and produces the inverted bit at OUT', () => {
@@ -30,9 +97,18 @@ test('sandbox NOT uses one input pin and produces the inverted bit at OUT', () =
 
   expect(state.cargo).toHaveLength(0);
   expect(state.gateState[gate.id].inputs).toEqual({});
-  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 1 });
+  expect(state.gateState[gate.id].pendingOutput).toBeNull();
+  expect(state.gateState[gate.id].processing).toMatchObject({ value: 1, duration: 0.8 });
   expect(state.gateState[gate.id].activations).toBe(1);
-  expect(state.message).toMatch(/NOT consumed IN=0 and produced 1 at OUT/);
+  expect(state.message).toMatch(/NOT consumed IN=0 and is processing/);
+
+  state = advanceCircuit(activeLevel, state, 0.4);
+  expect(state.gateState[gate.id].pendingOutput).toBeNull();
+  expect(state.gateState[gate.id].processing.remaining).toBeCloseTo(0.4);
+  state = advanceCircuit(activeLevel, state, 0.5);
+  expect(state.gateState[gate.id].processing).toBeNull();
+  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 1 });
+  expect(state.message).toMatch(/propagation delay complete/);
 });
 
 test('physical drops onto sandbox AND inputs are captured and produce an output', () => {
@@ -67,10 +143,15 @@ test('physical drops onto sandbox AND inputs are captured and produce an output'
   }, 'and-zero');
 
   expect(state.gateState[gate.id].inputs).toEqual({});
-  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 0 });
+  expect(state.gateState[gate.id].pendingOutput).toBeNull();
+  expect(state.gateState[gate.id].processing).toMatchObject({ value: 0, duration: 1 });
   expect(state.gateState[gate.id].activations).toBe(1);
   expect(state.worldBits.some((bit) => bit.id === 'and-zero')).toBe(false);
-  expect(state.message).toMatch(/AND consumed A=1, B=0 and produced 0 at OUT/);
+  expect(state.message).toMatch(/AND consumed A=1, B=0 and is processing/);
+
+  state = advanceCircuit(activeLevel, state, 1.05);
+  expect(state.gateState[gate.id].processing).toBeNull();
+  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 0 });
 });
 
 
@@ -225,7 +306,8 @@ test('sandbox gate OUT drives copper that starts beside the output pad', () => {
   const inputB = gateInputPosition(gate, 'b');
   state = dropCargoBit(activeLevel, { ...state, player: { x: inputA.x + 0.45, y: inputA.y } }, 'out-one-a');
   state = dropCargoBit(activeLevel, { ...state, player: { x: inputB.x + 0.45, y: inputB.y } }, 'out-one-b');
-  expect(state.gateState[gate.id].pendingOutput).toMatchObject({ value: 1 });
+  expect(state.gateState[gate.id].pendingOutput).toBeNull();
+  expect(state.gateState[gate.id].processing).toMatchObject({ value: 1 });
 
   const output = gateOutputPosition(gate);
   const outputCell = terrainCell(output.x, output.y);
@@ -250,6 +332,52 @@ test('sandbox gate OUT drives copper that starts beside the output pad', () => {
 
   expect(state.gateState[gate.id].pendingOutput).toBeNull();
   expect(state.circuit.pinOutputs[receiveId]).toMatchObject({ value: 1 });
+});
+
+
+
+test('three NOT gates in a simple sandbox feedback loop form a seeded ring oscillator', () => {
+  let { state, activeLevel, gates } = buildNotFeedback(3);
+  const outputConnections = circuitConnections(activeLevel, state).filter((port) => port.kind === 'gateOutput');
+  expect(outputConnections).toHaveLength(3);
+  expect(outputConnections.every((port) => /Ring oscillator: 3 NOT stages/.test(port.reason))).toBe(true);
+
+  state = {
+    ...state,
+    cargo: [{ id: 'ring-seed', value: 0 }],
+    player: { x: 0, y: -4 },
+  };
+  state = depositCargo(activeLevel, state, 'ring-seed', { kind: 'gate', gateId: gates[0].id, inputId: 'in' });
+  expect(state.gateState[gates[0].id].processing).toMatchObject({ value: 1 });
+
+  for (let i = 0; i < 500; i += 1) state = advanceCircuit(activeLevel, state, 0.05);
+
+  expect(state.gateState[gates[0].id].activations).toBeGreaterThan(1);
+  expect(state.gateState[gates[1].id].activations).toBeGreaterThan(0);
+  expect(state.gateState[gates[2].id].activations).toBeGreaterThan(0);
+  const liveSignals = state.circuit.packets.length
+    + gates.filter((gate) => state.gateState[gate.id].processing).length
+    + gates.filter((gate) => state.gateState[gate.id].pendingOutput).length;
+  expect(liveSignals).toBe(1);
+});
+
+test('an even two-NOT feedback loop stays blocked as unsupported feedback', () => {
+  let { state, activeLevel, gates } = buildNotFeedback(2);
+  const outputConnections = circuitConnections(activeLevel, state).filter((port) => port.kind === 'gateOutput');
+  expect(outputConnections).toHaveLength(2);
+  expect(outputConnections.every((port) => /Feedback loop/.test(port.reason))).toBe(true);
+
+  state = {
+    ...state,
+    cargo: [{ id: 'even-seed', value: 0 }],
+    player: { x: 0, y: -4 },
+  };
+  state = depositCargo(activeLevel, state, 'even-seed', { kind: 'gate', gateId: gates[0].id, inputId: 'in' });
+  for (let i = 0; i < 100; i += 1) state = advanceCircuit(activeLevel, state, 0.05);
+
+  expect(state.gateState[gates[0].id].pendingOutput).toMatchObject({ value: 1 });
+  expect(state.gateState[gates[1].id].activations).toBe(0);
+  expect(state.circuit.packets).toHaveLength(0);
 });
 
 
