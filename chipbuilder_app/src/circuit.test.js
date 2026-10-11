@@ -133,9 +133,10 @@ test('unconnected NOT output is collected once and can be carried to DEST', () =
   const state = run(depositCargo(level, withCargo(fabricateRoute(routeCells.filter(([col]) => col < 8))), 'test-bit', { kind: 'source', sourceId: 'source' }));
   expect(state.gateState['wired-not'].pendingOutput.value).toBe(1);
   expect(state.gateState['wired-not'].activations).toBe(1);
-  const outside = movePlayer(level, { ...state, player: { x: 2.1, y: -0.375 } }, { x: 0, y: 0 });
+  const outputPosition = gateOutputPosition(level.gates[0]);
+  const outside = movePlayer(level, { ...state, player: { x: outputPosition.x + 1, y: outputPosition.y } }, { x: 0, y: 0 });
   expect(outside.cargo).toHaveLength(0);
-  const next = movePlayer(level, { ...state, player: gateOutputPosition(level.gates[0]) }, { x: 0, y: 0 });
+  const next = movePlayer(level, { ...state, player: outputPosition }, { x: 0, y: 0 });
   expect(next.cargo).toEqual([{ id: state.gateState['wired-not'].pendingOutput.id, value: 1 }]);
   expect(next.gateState['wired-not'].pendingOutput).toBeNull();
   const again = run(movePlayer(level, next, { x: 0, y: 0 }));
