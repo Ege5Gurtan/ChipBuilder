@@ -16,6 +16,25 @@ function run(state, mission = level) {
   return state;
 }
 
+test('lithography tile clicks toggle the active mask and refund pre-process costs', () => {
+  let state = createGame(level);
+  state = fabricateCell(state, 'lithography', 2, 5, true);
+  state = fabricateCell(state, 'lithography', 3, 5, true);
+  expect(state.terrain[5][2].masked).toBe(true);
+  expect(state.terrain[5][3].masked).toBe(true);
+  expect(state.cost).toMatchObject({ processSteps: 1, manufacturing: 22 });
+
+  state = fabricateCell(state, 'lithography', 2, 5, true);
+  expect(state.terrain[5][2].masked).toBe(false);
+  expect(state.terrain[5][3].masked).toBe(true);
+  expect(state.cost).toMatchObject({ processSteps: 1, manufacturing: 20 });
+
+  state = fabricateCell(state, 'lithography', 3, 5, true);
+  expect(state.terrain[5][3].masked).toBe(false);
+  expect(state.cost).toMatchObject({ processSteps: 0, manufacturing: 0 });
+  expect(state.message).toMatch(/tile removed/i);
+});
+
 test('dropping anywhere on the SRC-to-IN copper injects toward IN and completes the wired NOT path', () => {
   let state = withCargo(fabricateRoute());
   state = dropCargoBit(level, { ...state, player: { x: -2.2, y: -0.375 } }, 'test-bit');
