@@ -582,6 +582,10 @@ function App() {
               );
             }
             const pendingOutput = currentGate.pendingOutput;
+            const processing = currentGate.processing;
+            const processingPercent = processing
+              ? Math.max(0, Math.min(100, Math.round((1 - processing.remaining / Math.max(0.0001, processing.duration)) * 100)))
+              : null;
             return (
               <section className="tool-section gate-section" key={gate.id}>
                 <div className="section-heading">
@@ -597,16 +601,16 @@ function App() {
                       </span>
                     );
                   })}
-                  <span className={`gate-status-chip ${pendingOutput ? 'output-ready' : ''}`}>
-                    OUT: {pendingOutput ? `bit ${pendingOutput.value} ready` : 'empty'}
+                  <span className={`gate-status-chip ${pendingOutput ? 'output-ready' : processing ? 'loaded' : ''}`}>
+                    OUT: {pendingOutput ? `bit ${pendingOutput.value} ready` : processing ? `processing ${processingPercent}%` : 'empty'}
                   </span>
                 </div>
-                {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input and sends its result through the wire at OUT. Walking through this gate leaves cargo unchanged. Walk over OUT to collect a waiting output bit, then carry it to DEST and press Enter.</p> : <><p className="microcopy">
+                {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input, waits for its propagation delay, then sends the result through the wire at OUT. The progress bar on the gate shows processing. Walking through this gate leaves cargo unchanged. Walk over OUT to collect a waiting output bit, then carry it to DEST and press Enter.</p> : <><p className="microcopy">
                   Use the physical A/B ports on the wafer. Drag a cargo bit onto a port or select the bit and click the port.
                   K is reserved for dropping cargo freely onto the wafer. Click a loaded input to take it back before the second input is loaded.
                 </p>
                 <p className="gate-reason">
-                  When both inputs are loaded, they are consumed and one new output bit appears at OUT. Walk over OUT to collect it.
+                  When all inputs are loaded, they are consumed and the gate processes them for its propagation delay. The progress bar fills, then one new output bit appears at OUT. Walk over OUT to collect it.
                 </p></>}
               </section>
             );
