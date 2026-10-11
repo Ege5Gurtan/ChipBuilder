@@ -1,4 +1,4 @@
-import yaml from 'js-yaml';
+import yaml from 'js-yaml/dist/js-yaml.js';
 import { cellPosition } from './circuit.js';
 import { BASE_HEIGHT, TERRAIN_COLUMNS, TERRAIN_ROWS, terrainCell } from './terrain.js';
 
