@@ -1,11 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ThreeScene, { editable } from './ThreeScene.js';
 import levels from './levels.js';
-import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, reclaimGateInput, reorderCargo, setPinVoltage, undoTerrainEdit } from './gameRules.js';
+import { advanceCircuit, circuitConnections, circuitPorts, reclaimCircuitSource, applyTerrainProcess, attemptSignalDelivery, createGame, depositCargo, dropCargoBit, fabricate, fabricateCell, isPassThroughGate, movePlayer, placeSandboxGate, reclaimGateInput, reorderCargo, SANDBOX_GATE_TYPES, setPinVoltage, undoTerrainEdit } from './gameRules.js';
 import { FAB_TOOLS } from './terrain.js';
 import './App.css';
 
 const DRAG_THRESHOLD = 4;
+const GATE_DESCRIPTIONS = {
+  NOT: 'Walk through to invert carried bits.',
+  AND: 'Load A and B; OUT is 1 only when both are 1.',
+  OR: 'Load A and B; OUT is 1 when either input is 1.',
+};
 
 function Bit({ value }) {
   return <span className={`bit bit-${value}`}>{value}</span>;
@@ -25,6 +30,7 @@ function App() {
   const [selectedVoltagePinId, setSelectedVoltagePinId] = useState(null);
   const [cmpHeight, setCmpHeight] = useState(1);
   const [drag, setDrag] = useState(null);
+  const [gateDragType, setGateDragType] = useState(null);
   const dragRef = useRef(null);
   const pressRef = useRef(null);
   const suppressClick = useRef(false);
@@ -32,13 +38,17 @@ function App() {
   const keyboardNav = useRef(false);
   const sceneRef = useRef(null);
   const level = levels[levelIndex];
+  const activeLevel = useMemo(() => ({
+    ...level,
+    gates: [...(level.gates || []), ...(game.placedGates || [])],
+  }), [level, game.placedGates]);
   const terrainProcesses = level.fabrication?.allowedProcesses || ['lithography', 'etch', 'deposit', 'cmp'];
   const allowLithography = Boolean(game.terrain && terrainProcesses.includes('lithography'));
   const maskedTiles = game.terrain ? game.terrain.flat().filter((cell) => cell.masked).length : 0;
   const selectedId = game.cargo.some((item) => item.id === selectedCargoId) ? selectedCargoId : null;
-  const socketGates = level.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
-  const connections = level.circuit ? circuitConnections(level, game) : [];
-  const voltagePins = level.sandbox ? circuitPorts(level, game).filter((port) => port.kind === 'pin') : [];
+  const socketGates = activeLevel.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired);
+  const connections = activeLevel.circuit ? circuitConnections(activeLevel, game) : [];
+  const voltagePins = level.sandbox ? circuitPorts(activeLevel, game).filter((port) => port.kind === 'pin') : [];
   const selectedVoltagePin = voltagePins.find((pin) => pin.id === selectedVoltagePinId) || null;
   const flashedIds = game.gateEvent?.ids || [];
 
@@ -48,6 +58,7 @@ function App() {
     setSelectedCargoId(null);
     setSelectedVoltagePinId(null);
     setCmpHeight(1);
+    setGateDragType(null);
     pressRef.current = null;
     updateDrag(null);
   };
@@ -64,21 +75,21 @@ function App() {
   };
 
   const handleMove = useCallback((movement) => {
-    setGame((current) => movePlayer(level, current, movement));
-  }, [level]);
+    setGame((current) => movePlayer(activeLevel, current, movement));
+  }, [activeLevel]);
 
   const tickCircuit = useCallback((delta) => {
-    setGame((current) => advanceCircuit(level, current, delta));
-  }, [level]);
+    setGame((current) => advanceCircuit(activeLevel, current, delta));
+  }, [activeLevel]);
 
   const deliver = useCallback(() => {
-    setGame((current) => attemptSignalDelivery(level, current));
-  }, [level]);
+    setGame((current) => attemptSignalDelivery(activeLevel, current));
+  }, [activeLevel]);
 
   const drop = useCallback(() => {
-    setGame((current) => dropCargoBit(level, current, selectedId));
+    setGame((current) => dropCargoBit(activeLevel, current, selectedId));
     setSelectedCargoId(null);
-  }, [level, selectedId]);
+  }, [activeLevel, selectedId]);
 
   useEffect(() => {
     const pointer = () => { keyboardNav.current = false; };
@@ -109,7 +120,7 @@ function App() {
 
   const deposit = (cargoId, target) => {
     if (!cargoId) return;
-    setGame((current) => depositCargo(level, current, cargoId, target));
+    setGame((current) => depositCargo(activeLevel, current, cargoId, target));
     setSelectedCargoId(null);
   };
 
@@ -136,20 +147,20 @@ function App() {
       else setGame((current) => ({ ...current, message: 'Select a cargo bit and click or drag it onto the pin. You can also stand anywhere on a valid two-socket copper trace and press K to inject the bit into the wire.' }));
       return;
     }
-    if (level.gates.find((gate) => gate.id === gateId)?.wired) {
+    if (activeLevel.gates.find((gate) => gate.id === gateId)?.wired) {
       setGame((current) => ({ ...current, message: 'This gate receives bits through copper. Connect SRC to IN, then load the bit at SRC.' }));
       return;
     }
     const loaded = game.gateState[gateId]?.inputs?.[inputId];
     if (loaded !== undefined) {
-      setGame((current) => reclaimGateInput(level, current, gateId, inputId));
+      setGame((current) => reclaimGateInput(activeLevel, current, gateId, inputId));
       return;
     }
     if (!selectedId) {
       setGame((current) => ({ ...current, message: 'Select a cargo bit, or drag one from cargo onto an empty gate input port.' }));
       return;
     }
-    setGame((current) => depositCargo(level, current, selectedId, { kind: 'gate', gateId, inputId }));
+    setGame((current) => depositCargo(activeLevel, current, selectedId, { kind: 'gate', gateId, inputId }));
     setSelectedCargoId(null);
   };
 
@@ -217,6 +228,33 @@ function App() {
   const runTerrainProcess = (action) => {
     if (!terrainProcesses.includes(action)) return;
     setGame((current) => applyTerrainProcess(current, action, cmpHeight));
+  };
+
+  const gateDragStart = (event, type) => {
+    if (!level.sandbox || game.status !== 'playing') return;
+    setGateDragType(type);
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData('application/x-semicon-gate', type);
+    event.dataTransfer.setData('text/plain', type);
+  };
+
+  const gateDragOverWafer = (event) => {
+    if (!level.sandbox) return;
+    if (!gateDragType && !event.dataTransfer.types.includes('application/x-semicon-gate')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const dropGateOnWafer = (event) => {
+    if (!level.sandbox) return;
+    const type = event.dataTransfer.getData('application/x-semicon-gate') || gateDragType;
+    if (!SANDBOX_GATE_TYPES.includes(type)) return;
+    event.preventDefault();
+    const point = sceneRef.current?.waferPointAtClientPoint(event.clientX, event.clientY) || null;
+    setGame((current) => point
+      ? placeSandboxGate(level, current, type, point)
+      : { ...current, message: 'Drop logic gates directly on the wafer surface.' });
+    setGateDragType(null);
   };
 
   const nextLevel = () => {
@@ -331,10 +369,14 @@ function App() {
           </div>
         </aside>
 
-        <section className="wafer-panel">
+        <section
+          className={`wafer-panel ${gateDragType ? 'gate-drop-mode' : ''}`}
+          onDragOver={gateDragOverWafer}
+          onDrop={dropGateOnWafer}
+        >
           <ThreeScene
             ref={sceneRef}
-            level={level}
+            level={activeLevel}
             game={game}
             onMove={handleMove}
             onTick={tickCircuit}
@@ -345,6 +387,7 @@ function App() {
             interactingCargo={Boolean(selectedId)}
             allowLithography={allowLithography}
           />
+          {gateDragType && <div className="gate-drop-hint" aria-hidden="true">Drop {gateDragType} gate on the wafer</div>}
           <div className={`event-strip ${game.status}`} role="status" aria-live="polite">
             <span>{game.status === 'failed' ? 'CHECK FAILED' : game.status === 'success' ? 'DELIVERY OK' : 'SYSTEM'}</span>
             <p>{game.message}</p>
@@ -413,8 +456,29 @@ function App() {
           </section>
 
           {level.sandbox && (
+            <section className="tool-section gate-palette-section">
+              <div className="section-heading"><span>02</span><h3>Logic gates</h3></div>
+              <p className="microcopy">Drag a gate onto the wafer. Gates snap to a small placement grid and cannot overlap another gate.</p>
+              <div className="gate-palette" aria-label="Sandbox logic gate palette">
+                {SANDBOX_GATE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    className="gate-palette-button"
+                    draggable={game.status === 'playing'}
+                    onDragStart={(event) => gateDragStart(event, type)}
+                    onDragEnd={() => setGateDragType(null)}
+                  >
+                    <strong>{type}</strong>
+                    <small>{GATE_DESCRIPTIONS[type]}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {level.sandbox && (
             <section className="tool-section circuit-section">
-              <div className="section-heading"><span>02</span><h3>Contact voltage</h3></div>
+              <div className="section-heading"><span>03</span><h3>Contact voltage</h3></div>
               <p className="microcopy">
                 Deposit tungsten on copper, then click a tungsten contact on the wafer. Give one connected contact High voltage and another Low voltage.
               </p>
@@ -459,14 +523,14 @@ function App() {
             </section>
           )}
 
-          {level.gates.map((gate) => {
+          {activeLevel.gates.map((gate) => {
             const currentGate = game.gateState[gate.id];
             if (isPassThroughGate(gate)) {
               const active = game.gateEvent?.gateId === gate.id;
               return (
                 <section className="tool-section gate-section" key={gate.id}>
                   <div className="section-heading">
-                    <span>02</span>
+                    <span>{level.sandbox ? 'GATE' : '02'}</span>
                     <h3>{gate.type} gate</h3>
                   </div>
                   <div
@@ -489,7 +553,7 @@ function App() {
             return (
               <section className="tool-section gate-section" key={gate.id}>
                 <div className="section-heading">
-                  <span>02</span>
+                  <span>{level.sandbox ? 'GATE' : '02'}</span>
                   <h3>{gate.type} gate</h3>
                 </div>
                 <div className="gate-status-row" aria-label={`${gate.type} gate port status`}>
@@ -518,7 +582,7 @@ function App() {
 
           {game.terrain && (
             <section className="tool-section fabrication-section">
-              <div className="section-heading"><span>{level.sandbox ? '03' : '02'}</span><h3>Fabrication</h3></div>
+              <div className="section-heading"><span>{level.sandbox ? '04' : '02'}</span><h3>Fabrication</h3></div>
 
               {allowLithography && (
                 <>
@@ -617,7 +681,7 @@ function App() {
           {!level.sandbox && (
             <section className="tool-section delivery-section">
               <div className="section-heading">
-                <span>{level.gates.length || level.fabrication ? '03' : '02'}</span>
+                <span>{activeLevel.gates.length || level.fabrication ? '03' : '02'}</span>
                 <h3>DEST delivery</h3>
               </div>
               <div className="slot-row" aria-label="Target slots">
