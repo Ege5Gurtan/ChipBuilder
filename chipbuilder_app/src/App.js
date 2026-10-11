@@ -7,7 +7,7 @@ import './App.css';
 
 const DRAG_THRESHOLD = 4;
 const GATE_DESCRIPTIONS = {
-  NOT: 'Walk through to invert carried bits.',
+  NOT: 'Load IN; OUT is the inverted bit.',
   AND: 'Load A and B; OUT is 1 only when both are 1.',
   OR: 'Load A and B; OUT is 1 when either input is 1.',
 };
