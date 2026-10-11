@@ -70,7 +70,7 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
 # Gameplay
 
-Eleven selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, copper interconnects, and tungsten wire pins. WASD always controls the carrier while the mouse paints fabrication patterns. K always drops the selected cargo bit freely onto the wafer; loading a gate/source/pin is explicit via click, drag/drop, or the circuit-panel send button. Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
+Eleven selectable missions teach carrier movement, signal delivery, lithography, etching, deposition, CMP, NOT logic, copper interconnects, and tungsten wire pins. WASD always controls the carrier while the mouse paints fabrication patterns. K physically drops the selected cargo bit: off wire it stays on the wafer, while on a valid two-socket copper connection it is injected automatically from that point and travels through the wire. Gates/sources/pins can also be loaded explicitly via click, drag/drop, or the circuit-panel send button. Enter delivers collected cargo at DEST in every mission. Cargo can be reordered by dragging.
 
 ## Level 09: Wire the NOT Gate
 
@@ -95,3 +95,5 @@ Run `CI=true npm test -- --watchAll=false --runInBand` for circuit and gameplay 
 
 
 Circuit driver conflicts are evaluated from active signal tokens rather than static output-capable pads. A tungsten pin may therefore drive a connected net while a built-in source or gate output on that net is idle; two simultaneously active drivers still block transport as a short.
+
+A dropped bit does not need to land exactly on SRC/IN/OUT. On a simple copper net with exactly two compatible sockets, dropping anywhere on the trace injects the bit into the wire. SRC/OUT-side sockets establish the source side toward IN/DEST/pin receivers; a pin-to-pin wire uses the nearer pin as the entry side and sends toward the opposite pin. Invalid, ambiguous, busy, shorted, or open nets keep the bit as a normal wafer drop.
