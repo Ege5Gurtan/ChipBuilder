@@ -14,7 +14,32 @@ export function wirePins(terrain) {
       ? [{ id: `pin-${col}-${row}`, col, row, ...cellPosition({ col, row }) }] : []));
 }
 
+const CARDINAL_OFFSETS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+function isGateContact(port) {
+  return port?.kind === 'gate' || port?.kind === 'gateOutput';
+}
+
+function neighboringCells(cell) {
+  return CARDINAL_OFFSETS.map(([dc, dr]) => ({ col: cell.col + dc, row: cell.row + dr }));
+}
+
+function portTouchesCopperCells(port, cells) {
+  const contactCell = terrainCell(port.x, port.y);
+  if (cells.has(cellKey(contactCell))) return true;
+  if (!isGateContact(port)) return false;
+  return neighboringCells(contactCell).some((cell) => cells.has(cellKey(cell)));
+}
+
+function routeEndpointCells(net, endpoint) {
+  const contactCell = terrainCell(endpoint.x, endpoint.y);
+  if (net.cells.has(cellKey(contactCell))) return [contactCell];
+  if (!isGateContact(endpoint)) return [];
+  return neighboringCells(contactCell).filter((cell) => net.cells.has(cellKey(cell)));
+}
+
 // Copper has no direction. Four-neighbour connectivity defines passive electrical nets.
+// Prefabricated gate contacts also connect when copper reaches any cardinal edge of the pad.
 export function wireNets(terrain, ports) {
   const remaining = new Map();
   terrain?.forEach((row, r) => row.forEach((cell, col) => {
@@ -35,7 +60,7 @@ export function wireNets(terrain, ports) {
         remaining.delete(key); cells.set(key, cell); queue.push(cell);
       });
     }
-    const attached = ports.filter((port) => cells.has(cellKey(terrainCell(port.x, port.y))));
+    const attached = ports.filter((port) => portTouchesCopperCells(port, cells));
     const drivers = attached.filter((port) => port.role === 'driver');
     const receivers = attached.filter((port) => port.role === 'receiver');
     nets.push({ cells, ports: attached, drivers, receivers, conflict: drivers.length > 1 });
@@ -44,21 +69,35 @@ export function wireNets(terrain, ports) {
 }
 
 export function wireRoute(net, from, to) {
-  const start = terrainCell(from.x, from.y), end = terrainCell(to.x, to.y);
-  const visited = new Map([[cellKey(start), null]]), queue = [start];
+  const fromCell = terrainCell(from.x, from.y);
+  const toCell = terrainCell(to.x, to.y);
+  const starts = routeEndpointCells(net, from);
+  const ends = routeEndpointCells(net, to);
+  if (!starts.length || !ends.length) return [];
+
+  const endKeys = new Set(ends.map(cellKey));
+  const visited = new Map(starts.map((cell) => [cellKey(cell), null]));
+  const queue = starts.map((cell) => net.cells.get(cellKey(cell)));
+
   for (let i = 0; i < queue.length; i += 1) {
     const cell = queue[i];
-    if (cellKey(cell) === cellKey(end)) {
+    if (endKeys.has(cellKey(cell))) {
       const route = [];
-      let key = cellKey(end);
-      while (key) { route.unshift(net.cells.get(key)); key = visited.get(key); }
+      let key = cellKey(cell);
+      while (key) {
+        route.unshift(net.cells.get(key));
+        key = visited.get(key);
+      }
+      if (cellKey(fromCell) !== cellKey(route[0])) route.unshift(fromCell);
+      if (cellKey(toCell) !== cellKey(route[route.length - 1])) route.push(toCell);
       return route;
     }
     const { col, row } = cell;
-    [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]].forEach(([c, r]) => {
-      const next = `${c}:${r}`;
+    CARDINAL_OFFSETS.forEach(([dc, dr]) => {
+      const next = `${col + dc}:${row + dr}`;
       if (!net.cells.has(next) || visited.has(next)) return;
-      visited.set(next, cellKey(cell)); queue.push(net.cells.get(next));
+      visited.set(next, cellKey(cell));
+      queue.push(net.cells.get(next));
     });
   }
   return [];
