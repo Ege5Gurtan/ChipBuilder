@@ -14,7 +14,7 @@ const GATE_FOOTPRINTS = { NOT: { width: 1.75, height: 1.35 }, AND: { width: 2.15
 export const SANDBOX_GATE_TYPES = ['NOT', 'AND', 'OR'];
 
 const SANDBOX_GATE_BLUEPRINTS = {
-  NOT: { type: 'NOT' },
+  NOT: { type: 'NOT', inputs: [{ id: 'in', label: 'IN' }] },
   AND: { type: 'AND', inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
   OR: { type: 'OR', inputs: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
 };
@@ -41,7 +41,7 @@ export function gateOutputPosition(gate) {
 }
 
 export function isPassThroughGate(gate) {
-  return !gate.wired && Boolean(PASS_THROUGH_GATES[gate.type]);
+  return !gate.wired && !gate.inputs?.length && Boolean(PASS_THROUGH_GATES[gate.type]);
 }
 
 export function applyGateToCargo(gateType, cargo) {
@@ -112,9 +112,7 @@ export function placeSandboxGate(level, state, type, position) {
       ...state.gateState,
       [gate.id]: { inputs: {}, output: null, pendingOutput: null, inside: false, activations: 0 },
     },
-    message: type === 'NOT'
-      ? 'NOT gate placed. Carry a bit through it to invert the cargo.'
-      : `${type} gate placed. Load A and B from cargo, then collect the result at OUT.`,
+    message: `${type} gate placed. Load ${gate.inputs.map((input) => input.label).join(' and ')} from cargo, then collect the result at OUT.`,
   };
 }
 
@@ -431,7 +429,7 @@ export function depositCargo(level, state, cargoId, target) {
   if (!input || currentGate.inputs[input.id] !== undefined) return state;
 
   if (currentGate.pendingOutput) {
-    return { ...state, message: gate.wired ? `${gate.type} OUT is occupied. Collect the waiting bit or complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another pair.` };
+    return { ...state, message: gate.wired ? `${gate.type} OUT is occupied. Collect the waiting bit or complete its copper connection before sending another bit.` : `${gate.type} OUT is occupied. Collect the output bit before loading another input.` };
   }
 
   const inputs = { ...currentGate.inputs, [input.id]: { id: cargo.id, value: cargo.value } };
