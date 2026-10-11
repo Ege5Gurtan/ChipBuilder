@@ -708,28 +708,55 @@ function wireDropEndpoints(net, state, position) {
   return { entry, receiver };
 }
 
-function sandboxVoltageEndpoints(net, state, position) {
+function sandboxVoltageEndpoints(net, state) {
   const pins = net.ports.filter((port) => port.kind === 'pin');
   const high = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'high');
   const low = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'low');
   if (high.length !== 1 || low.length !== 1) return null;
-
-  const dropCell = terrainCell(position.x, position.y);
-  if (cellKey(dropCell) !== cellKey(high[0])) return null;
   if (!receiverAvailable(state, low[0])) return null;
   return { entry: high[0], receiver: low[0] };
 }
 
-function injectDroppedBitOnCopper(level, state, bit, position) {
-  if (!position || (!level.circuit && !level.sandbox) || !state.terrain) return null;
+function sandboxPacketForBit(level, state, bit, position) {
+  if (!level.sandbox || !position || !state.terrain) return null;
   const cell = terrainCell(position.x, position.y);
   const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
   if (!net) return null;
-  const endpoints = level.sandbox
-    ? sandboxVoltageEndpoints(net, state, position)
-    : wireDropEndpoints(net, state, position);
+  const endpoints = sandboxVoltageEndpoints(net, state);
   if (!endpoints) return null;
-  const route = wireRoute(net, level.sandbox ? endpoints.entry : position, endpoints.receiver);
+  const route = wireRoute(net, position, endpoints.receiver);
+  if (!route.length) return null;
+  return {
+    id: `${bit.id}->${endpoints.receiver.id}`,
+    bit: { id: `${bit.id}->${endpoints.receiver.id}`, value: bit.value },
+    driverId: endpoints.entry.id,
+    receiver: endpoints.receiver,
+    route,
+    progress: 0,
+  };
+}
+
+function injectDroppedBitOnCopper(level, state, bit, position) {
+  if (!position || (!level.circuit && !level.sandbox) || !state.terrain) return null;
+
+  if (level.sandbox) {
+    const packet = sandboxPacketForBit(level, state, bit, position);
+    if (!packet) return null;
+    return {
+      ...state,
+      cargo: state.cargo.filter((item) => item.id !== bit.id),
+      circuit: { ...state.circuit, packets: [...state.circuit.packets, packet] },
+      cost: { ...state.cost, energy: state.cost.energy + 1 },
+      message: `Bit ${bit.value} is moving along copper toward the Low voltage contact.`,
+    };
+  }
+
+  const cell = terrainCell(position.x, position.y);
+  const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
+  if (!net) return null;
+  const endpoints = wireDropEndpoints(net, state, position);
+  if (!endpoints) return null;
+  const route = wireRoute(net, position, endpoints.receiver);
   if (!route.length) return null;
 
   const packet = {
@@ -745,10 +772,24 @@ function injectDroppedBitOnCopper(level, state, bit, position) {
     cargo: state.cargo.filter((item) => item.id !== bit.id),
     circuit: { ...state.circuit, packets: [...state.circuit.packets, packet] },
     cost: { ...state.cost, energy: state.cost.energy + 1 },
-    message: level.sandbox
-      ? `Bit ${bit.value} is moving from the High voltage tungsten contact to the Low voltage contact.`
-      : `Dropped ${bit.value} onto copper. The wire accepted it and is carrying it toward ${endpoints.receiver.label}.`,
+    message: `Dropped ${bit.value} onto copper. The wire accepted it and is carrying it toward ${endpoints.receiver.label}.`,
   };
+}
+
+function energizeSandboxWorldBits(level, state) {
+  if (!level.sandbox || !state.worldBits.length) return state;
+  return [...state.worldBits].reduce((current, bit) => {
+    if (!current.worldBits.some((item) => item.id === bit.id)) return current;
+    const packet = sandboxPacketForBit(level, current, bit, bit);
+    if (!packet) return current;
+    return {
+      ...current,
+      worldBits: current.worldBits.filter((item) => item.id !== bit.id),
+      circuit: { ...current.circuit, packets: [...current.circuit.packets, packet] },
+      cost: { ...current.cost, energy: current.cost.energy + 1 },
+      message: `Bit ${bit.value} is moving along copper toward the Low voltage contact.`,
+    };
+  }, state);
 }
 
 export function circuitConnections(level, state) {
@@ -905,14 +946,15 @@ function receiveCircuitBit(level, state, packet) {
 // Called independently of carrier movement. State owns transport; Three.js only draws packets.
 export function advanceCircuit(level, state, delta) {
   if ((!level.circuit && !level.sandbox) || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
-  const pendingDriver = Object.values(state.circuit.sources).some(Boolean)
-    || level.gates.some((gate) => gate.wired && state.gateState[gate.id].pendingOutput);
-  if (!state.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, state);
-  const packets = state.circuit.packets.map((packet) => ({ ...packet, progress: packet.progress + delta * SIGNAL_SPEED }));
+  let energized = level.sandbox ? energizeSandboxWorldBits(level, state) : state;
+  const pendingDriver = Object.values(energized.circuit.sources).some(Boolean)
+    || level.gates.some((gate) => gate.wired && energized.gateState[gate.id].pendingOutput);
+  if (!energized.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, energized);
+  const packets = energized.circuit.packets.map((packet) => ({ ...packet, progress: packet.progress + delta * SIGNAL_SPEED }));
   const arriving = packets.filter((packet) => packet.progress >= Math.max(1, packet.route.length - 1));
-  let next = state.circuit.packets.length
-    ? { ...state, circuit: { ...state.circuit, packets: packets.filter((packet) => !arriving.includes(packet)) } }
-    : state;
+  let next = energized.circuit.packets.length
+    ? { ...energized, circuit: { ...energized.circuit, packets: packets.filter((packet) => !arriving.includes(packet)) } }
+    : energized;
   arriving.forEach((packet) => { next = receiveCircuitBit(level, next, packet); });
   if (next.status !== 'playing') return next;
 

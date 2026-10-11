@@ -432,7 +432,7 @@ function App() {
                   <button onClick={() => chooseVoltage('low')} disabled={Boolean(game.circuit.packets.length)}>
                     <span>Low voltage</span><small>Bit destination</small>
                   </button>
-                  <p className="microcopy">Pick up the test bit, stand on the High contact, and press <b>K</b>. If copper connects it to exactly one Low contact, the bit moves High → Low.</p>
+                  <p className="microcopy">Drop the test bit anywhere on the connected copper path. With exactly one High contact and one Low contact, the bit automatically moves toward Low — even if the bit was already on the wire when you set the voltages.</p>
                 </>
               ) : (
                 <p className="microcopy">Click a functional tungsten contact to set its voltage.</p>
