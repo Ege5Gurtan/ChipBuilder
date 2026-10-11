@@ -52,6 +52,35 @@ test('shorting source and gate output rejects injection without consuming the to
   expect(next.circuit.packets).toHaveLength(0);
 });
 
+test('a tungsten pin may drive a connected net while a built-in source on that net is idle', () => {
+  let state = fabricateRoute();
+  state = fabricateCell(state, 'lithography', 3, 5, true);
+  state = applyTerrainProcess(state, 'tungsten');
+  state = withCargo(state);
+  const pin = circuitConnections(level, state).find((port) => port.id === 'pin-3-5');
+  expect(pin.canSend).toBe(true);
+  expect(pin.reason).toMatch(/Connected/);
+
+  state = depositCargo(level, state, 'test-bit', { kind: 'source', sourceId: 'pin-3-5' });
+  const result = run(state);
+  expect(result.status).toBe('success');
+  expect(result.gateState['wired-not'].activations).toBe(1);
+});
+
+test('two active drivers on one copper net still block transport as a real short', () => {
+  let state = fabricateRoute();
+  state = fabricateCell(state, 'lithography', 3, 5, true);
+  state = applyTerrainProcess(state, 'tungsten');
+  state = {
+    ...state,
+    cargo: [{ id: 'pin-bit', value: 0 }],
+    circuit: { ...state.circuit, sources: { ...state.circuit.sources, source: { id: 'src-bit', value: 0 } } },
+  };
+  const blocked = depositCargo(level, state, 'pin-bit', { kind: 'source', sourceId: 'pin-3-5' });
+  expect(blocked.cargo).toHaveLength(1);
+  expect(blocked.message).toMatch(/active driver|cannot send/i);
+});
+
 test('wrong wired output is rejected and returned to cargo for retry', () => {
   const result = run(depositCargo(level, withCargo(fabricateRoute(), 1), 'test-bit', { kind: 'source', sourceId: 'source' }));
   expect(result.status).toBe('playing');
@@ -260,13 +289,18 @@ test('etching away an occupied output pin returns its bit and breaks copper cont
   expect(etched.circuit.pinOutputs).toEqual({});
 });
 
-test('K loads a nearby created pin and supplied pads in a mixed mask need no extra tungsten', () => {
+test('K always drops cargo freely even beside a working pin; explicit pin loading still sends', () => {
   let state = makePins(createGame(sourcePinLevel), [[2, 5], [7, 5], [11, 5], [15, 5]]);
   expect(state.terrain.flat().filter((cell) => cell.contact === 'tungsten')).toHaveLength(1);
   expect(state.cost.manufacturing).toBe(52); // 26 mask + 26 tungsten; supplied pads skipped.
   state = withCargo(state);
   const pin = circuitConnections(sourcePinLevel, state).find((port) => port.id === 'pin-2-5');
-  const sent = dropCargoBit(sourcePinLevel, { ...state, player: pin }, 'test-bit');
-  expect(sent.cargo).toHaveLength(0);
-  expect(run(sent, sourcePinLevel).status).toBe('success');
+  const dropped = dropCargoBit(sourcePinLevel, { ...state, player: pin }, 'test-bit');
+  expect(dropped.cargo).toHaveLength(0);
+  expect(dropped.worldBits.some((bit) => bit.id === 'test-bit')).toBe(true);
+  expect(dropped.circuit.sources['pin-2-5']).toBeUndefined();
+
+  const explicit = depositCargo(sourcePinLevel, state, 'test-bit', { kind: 'source', sourceId: 'pin-2-5' });
+  expect(explicit.cargo).toHaveLength(0);
+  expect(run(explicit, sourcePinLevel).status).toBe('success');
 });
