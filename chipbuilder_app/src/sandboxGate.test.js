@@ -88,3 +88,19 @@ test('sandbox gate contacts use fixed roles and Drive can carry a 0 into an inpu
   expect(state.gateState[gate.id].inputs.a).toMatchObject({ value: 0 });
   expect(state.message).toMatch(/A loaded with 0/);
 });
+
+
+test('sandbox gate contacts are prefabricated and skip tungsten deposition', () => {
+  let state = placeSandboxGate(sandbox, createGame(sandbox), 'AND', { x: 1, y: 0 });
+  const gate = state.placedGates[0];
+  const inputA = gateInputPosition(gate, 'a');
+  const cell = terrainCell(inputA.x, inputA.y);
+
+  state = fabricateCell(state, 'lithography', cell.col, cell.row, true);
+  const before = state.cost;
+  const processed = applyTerrainProcess(state, 'tungsten');
+
+  expect(processed.cost).toEqual(before);
+  expect(processed.terrain[cell.row][cell.col].contact).toBeUndefined();
+  expect(processed.message).toMatch(/supplied pads|already have contacts/i);
+});
