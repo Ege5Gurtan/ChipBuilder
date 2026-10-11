@@ -25,6 +25,7 @@ Teach semiconductor and digital-logic ideas through playable cause and effect. P
 - Enter/K are ignored in editable fields and on keyboard-focused (Tab-navigated) controls.
 - Introduce logic gradually: pass-through gates transform carried bits on crossing; gates with multiple inputs require the player to place the appropriate bits at their distinct inputs. Eventually let players construct gates through simplified fabrication steps rather than only using premade gates.
 - Make signal state, cargo, gate inputs and outputs, destination requirement, and costs understandable on screen. Explain failed signal checks so a player can learn and retry.
+- The Process Sandbox has a drag-and-drop logic-gate palette. Dropped NOT, AND, and OR gates are gameplay state (`placedGates`), not render-only meshes: NOT keeps the pass-through cargo inversion rule, while AND/OR use the existing A/B input sockets and pending OUT token behavior. Gate drops snap to a small grid, must stay inside the wafer, and cannot overlap another gate.
 
 ## Levels and scoring
 
