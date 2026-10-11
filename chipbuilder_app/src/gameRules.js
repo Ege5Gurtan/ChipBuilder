@@ -699,22 +699,32 @@ export function reclaimCircuitSource(state, sourceId) {
 
 function depositTungsten(state) {
   const masked = state.terrain.flatMap((cells, row) => cells.flatMap((cell, col) => cell.masked ? [{ cell, col, row }] : []));
-  if (!masked.length) return { ...state, message: 'Pattern a copper tile first, then Deposit Tungsten to create a wire pin. No cost charged.' };
+  if (!masked.length) return { ...state, message: 'Pattern any wafer tile first, then Deposit Tungsten. Only tungsten on flush copper becomes an electrical pin.' };
   const supplied = new Set(state.circuit.prebuiltPinCells);
   const candidates = masked.filter((tile) => !supplied.has(cellKey(tile)) && tile.cell.contact !== 'tungsten');
-  if (candidates.some(({ cell }) => cell.material !== 'copper' || cell.height !== BASE_HEIGHT)) {
-    return { ...state, message: 'Tungsten pins need copper at height 1 beneath every new patterned pin. Fill Copper first. Mask kept; no cost charged.' };
-  }
-  if (!candidates.length) return { ...state, message: 'These pins already exist. Supplied pads need no tungsten; no cost charged.' };
-  const tool = FAB_TOOLS.tungsten, credits = tool.base + candidates.length * tool.cell;
+  if (!candidates.length) return { ...state, message: 'These locations already have contacts or supplied pads. No tungsten deposited and no process cost charged.' };
+  const functional = candidates.filter(({ cell }) => cell.material === 'copper' && cell.height === BASE_HEIGHT);
+  const functionalKeys = new Set(functional.map(cellKey));
   const keys = new Set(candidates.map(cellKey));
+  const tool = FAB_TOOLS.tungsten, credits = tool.base + candidates.length * tool.cell;
+  const badCount = candidates.length - functional.length;
+  const result = functional.length
+    ? `${functional.length} functional pin${functional.length === 1 ? '' : 's'} created`
+    : 'No functional pins created';
+  const warning = badCount
+    ? ` ${badCount} tungsten deposit${badCount === 1 ? '' : 's'} landed on non-copper or non-flush material and are electrically inactive.`
+    : '';
   return {
     ...state,
-    terrain: state.terrain.map((cells, row) => cells.map((cell, col) => ({ ...cell, masked: false,
-      ...(keys.has(cellKey({ col, row })) ? { contact: 'tungsten' } : {}) }))),
+    terrain: state.terrain.map((cells, row) => cells.map((cell, col) => {
+      const key = cellKey({ col, row });
+      if (!cell.masked) return cell;
+      if (!keys.has(key)) return { ...cell, masked: false };
+      return { ...cell, contact: 'tungsten', contactFunctional: functionalKeys.has(key), masked: false };
+    })),
     terrainHistory: pushTerrainHistory(state),
     cost: { ...state.cost, processSteps: state.cost.processSteps + 1, manufacturing: state.cost.manufacturing + credits },
-    message: `Created ${candidates.length} tungsten wire pin${candidates.length === 1 ? '' : 's'}. Select a cargo bit and click a pin to send; walk over a receiving pin to collect. +${credits} credits.`,
+    message: `Deposited tungsten on ${candidates.length} tile${candidates.length === 1 ? '' : 's'}: ${result}.${warning} +${credits} credits.`,
   };
 }
 
