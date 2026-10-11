@@ -1,4 +1,4 @@
-import { SIGNAL_SPEED, cellKey, wireNets, wirePins, wireRoute } from './circuit.js';
+import { SIGNAL_SPEED, cellKey, cellPosition, wireNets, wirePins, wireRoute } from './circuit.js';
 import { BASE_HEIGHT, createTerrain, FAB_TOOLS, MAX_HEIGHT, MIN_HEIGHT, terrainCell, terrainHeight } from './terrain.js';
 
 export const PLAYER_RADIUS = 0.34;
@@ -23,17 +23,21 @@ export function gateFootprint(gate) {
   return GATE_FOOTPRINTS[gate.type] || { width: 1.6, height: 1.3 };
 }
 
+function snapPortToTile(position) {
+  return cellPosition(terrainCell(position.x, position.y));
+}
+
 export function gateInputPosition(gate, inputId) {
   const { width, height } = gateFootprint(gate);
   const count = Math.max(1, gate.inputs?.length || 1);
   const index = Math.max(0, gate.inputs?.findIndex((input) => input.id === inputId) ?? 0);
   const offset = count === 1 ? 0 : (0.5 - index / (count - 1)) * height * 0.82;
-  return { x: gate.x - width / 2 - 0.42, y: gate.y + offset };
+  return snapPortToTile({ x: gate.x - width / 2 - 0.42, y: gate.y + offset });
 }
 
 export function gateOutputPosition(gate) {
   const { width } = gateFootprint(gate);
-  return { x: gate.x + width / 2 + 0.48, y: gate.y };
+  return snapPortToTile({ x: gate.x + width / 2 + 0.48, y: gate.y });
 }
 
 export function isPassThroughGate(gate) {
@@ -51,12 +55,13 @@ export function placeSandboxGate(level, state, type, position) {
   if (!level.sandbox || state.status !== 'playing' || !blueprint || !position) return state;
 
   const sequence = state.nextGateId || 1;
+  const snapped = cellPosition(terrainCell(position.x, position.y));
   const gate = {
     id: `sandbox-${type.toLowerCase()}-${sequence}`,
     type: blueprint.type,
     ...(blueprint.inputs ? { inputs: blueprint.inputs.map((input) => ({ ...input })) } : {}),
-    x: Math.round(position.x * 4) / 4,
-    y: Math.round(position.y * 4) / 4,
+    x: snapped.x,
+    y: snapped.y,
   };
   const { width, height } = gateFootprint(gate);
   const portMargin = 0.55;
@@ -692,20 +697,28 @@ function processTerrain(state, action, cmpHeight) {
 
 export function circuitPorts(level, state) {
   if (!level.circuit && !level.sandbox) return [];
-  const staticPorts = level.circuit ? [
-    ...(level.circuit.sources || []).map((source) => ({ ...source, role: 'driver', kind: 'source', label: source.label || 'SRC' })),
-    ...level.gates.filter((gate) => gate.wired).flatMap((gate) => [
-      ...gate.inputs.map((input) => ({
+  const sourcePorts = level.circuit
+    ? (level.circuit.sources || []).map((source) => ({ ...source, role: 'driver', kind: 'source', label: source.label || 'SRC' }))
+    : [];
+  const gatePorts = level.gates
+    .filter((gate) => gate.wired || level.sandbox)
+    .flatMap((gate) => [
+      ...(gate.inputs || []).map((input) => ({
         id: `${gate.id}:${input.id}`, role: 'receiver', kind: 'gate', gateId: gate.id, inputId: input.id,
         label: `${gate.type} ${input.label}`, ...gateInputPosition(gate, input.id),
       })),
-      { id: `${gate.id}:out`, role: 'driver', kind: 'gateOutput', gateId: gate.id, label: `${gate.type} OUT`, ...gateOutputPosition(gate) },
-    ]),
-    { id: 'destination', role: 'receiver', kind: 'destination', label: 'DEST', ...level.destination },
-  ] : [];
+      ...(gate.inputs?.length
+        ? [{ id: `${gate.id}:out`, role: 'driver', kind: 'gateOutput', gateId: gate.id, label: `${gate.type} OUT`, ...gateOutputPosition(gate) }]
+        : []),
+    ]);
+  const destinationPorts = level.circuit
+    ? [{ id: 'destination', role: 'receiver', kind: 'destination', label: 'DEST', ...level.destination }]
+    : [];
 
   return [
-    ...staticPorts,
+    ...sourcePorts,
+    ...gatePorts,
+    ...destinationPorts,
     ...wirePins(state?.terrain).map((pin) => {
       const hint = level.circuit?.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
       const voltage = state?.circuit?.pinVoltages?.[pin.id] || null;
@@ -798,9 +811,14 @@ function wireDropEndpoints(net, state, position) {
 function sandboxVoltageEndpoints(net, state) {
   const pins = net.ports.filter((port) => port.kind === 'pin');
   const high = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'high');
+  if (high.length !== 1) return null;
+
+  const gateReceivers = net.receivers.filter((port) => port.kind === 'gate' && receiverAvailable(state, port));
+  if (gateReceivers.length === 1) return { entry: high[0], receiver: gateReceivers[0] };
+  if (gateReceivers.length > 1) return null;
+
   const low = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'low');
-  if (high.length !== 1 || low.length !== 1) return null;
-  if (!receiverAvailable(state, low[0])) return null;
+  if (low.length !== 1 || !receiverAvailable(state, low[0])) return null;
   return { entry: high[0], receiver: low[0] };
 }
 
@@ -834,7 +852,7 @@ function injectDroppedBitOnCopper(level, state, bit, position) {
       cargo: state.cargo.filter((item) => item.id !== bit.id),
       circuit: { ...state.circuit, packets: [...state.circuit.packets, packet] },
       cost: { ...state.cost, energy: state.cost.energy + 1 },
-      message: `Bit ${bit.value} is moving along copper toward the Low voltage contact.`,
+      message: `Bit ${bit.value} is moving along copper toward ${packet.receiver.label}.`,
     };
   }
 
@@ -874,7 +892,7 @@ function energizeSandboxWorldBits(level, state) {
       worldBits: current.worldBits.filter((item) => item.id !== bit.id),
       circuit: { ...current.circuit, packets: [...current.circuit.packets, packet] },
       cost: { ...current.cost, energy: current.cost.energy + 1 },
-      message: `Bit ${bit.value} is moving along copper toward the Low voltage contact.`,
+      message: `Bit ${bit.value} is moving along copper toward ${packet.receiver.label}.`,
     };
   }, state);
 }
@@ -1035,7 +1053,7 @@ export function advanceCircuit(level, state, delta) {
   if ((!level.circuit && !level.sandbox) || state.status !== 'playing' || !Number.isFinite(delta) || delta <= 0) return state;
   let energized = level.sandbox ? energizeSandboxWorldBits(level, state) : state;
   const pendingDriver = Object.values(energized.circuit.sources).some(Boolean)
-    || level.gates.some((gate) => gate.wired && energized.gateState[gate.id].pendingOutput);
+    || level.gates.some((gate) => (gate.wired || level.sandbox) && energized.gateState[gate.id]?.pendingOutput);
   if (!energized.circuit.packets.length && !pendingDriver) return collectPinOutputs(level, energized);
   const packets = energized.circuit.packets.map((packet) => ({ ...packet, progress: packet.progress + delta * SIGNAL_SPEED }));
   const arriving = packets.filter((packet) => packet.progress >= Math.max(1, packet.route.length - 1));
