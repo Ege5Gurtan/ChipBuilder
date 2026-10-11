@@ -252,36 +252,12 @@ export function attemptSignalDelivery(level, state) {
   };
 }
 
-function nearestOpenGateInput(level, state) {
-  let nearest = null;
-  level.gates.filter((gate) => !isPassThroughGate(gate) && !gate.wired).forEach((gate) => {
-    const currentGate = state.gateState[gate.id];
-    if (!currentGate || currentGate.pendingOutput) return;
-    gate.inputs?.forEach((input) => {
-      if (currentGate.inputs[input.id] !== undefined) return;
-      const position = gateInputPosition(gate, input.id);
-      const distance = Math.hypot(state.player.x - position.x, state.player.y - position.y);
-      if (distance <= GATE_INPUT_INTERACTION_RADIUS && (!nearest || distance < nearest.distance)) {
-        nearest = { gateId: gate.id, inputId: input.id, distance };
-      }
-    });
-  });
-  return nearest;
-}
-
 export function dropCargoBit(level, state, cargoId) {
   if (state.status !== 'playing' || !state.cargo.length) return state;
   const item = state.cargo.find((bit) => bit.id === cargoId) || state.cargo[state.cargo.length - 1];
-  const source = circuitPorts(level, state).filter((port) => ['source', 'pin'].includes(port.kind))
-    .map((port) => ({ ...port, distance: Math.hypot(state.player.x - port.x, state.player.y - port.y) }))
-    .filter((port) => port.distance <= GATE_INPUT_INTERACTION_RADIUS)
-    .sort((a, b) => a.distance - b.distance)[0];
-  if (source) return loadCircuitSource(level, state, item.id, source.id);
-  const gateTarget = nearestOpenGateInput(level, state);
-  if (gateTarget) {
-    return depositCargo(level, state, item.id, { kind: 'gate', gateId: gateTarget.gateId, inputId: gateTarget.inputId });
-  }
 
+  // K is always a free wafer drop. Proximity to a pin or gate must never hijack the action.
+  // Players use click/drag (or the circuit-panel button) when they explicitly want to load a port.
   const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
   const spot = directions
     .map(([dx, dy]) => {
@@ -627,6 +603,13 @@ export function circuitPorts(level, state) {
   ];
 }
 
+function circuitDriverActive(state, port) {
+  const inFlight = state.circuit.packets.some((packet) => packet.driverId === port.id);
+  if (port.kind === 'source' || port.kind === 'pin') return Boolean(state.circuit.sources[port.id]) || inFlight;
+  if (port.kind === 'gateOutput') return Boolean(state.gateState[port.gateId]?.pendingOutput) || inFlight;
+  return false;
+}
+
 function circuitNets(level, state) {
   const nets = wireNets(state.terrain, circuitPorts(level, state));
   const edges = new Map();
@@ -642,8 +625,15 @@ function circuitNets(level, state) {
     return (edges.get(from) || []).some((gateId) => reaches(gateId, target, seen));
   };
   return nets.map((net) => {
-    const driver = net.drivers.length === 1 && net.drivers[0];
-    return { ...net, cycle: driver?.kind === 'gateOutput' && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, driver.gateId)) };
+    const staticDriver = net.drivers.length === 1 && net.drivers[0];
+    const activeDrivers = net.ports.filter((port) => circuitDriverActive(state, port));
+    return {
+      ...net,
+      activeDrivers,
+      conflict: activeDrivers.length > 1,
+      cycle: staticDriver?.kind === 'gateOutput'
+        && net.receivers.some((port) => port.kind === 'gate' && reaches(port.gateId, staticDriver.gateId)),
+    };
   });
 }
 
@@ -652,7 +642,8 @@ export function circuitConnections(level, state) {
   const nets = circuitNets(level, state);
   return ports.filter((port) => port.role === 'driver' || port.kind === 'pin').map((port) => {
     const net = nets.find((item) => item.ports.some((entry) => entry.id === port.id));
-    const receiving = port.kind === 'pin' && port.role === 'receiver' && net?.drivers.length > 0;
+    const activeOtherDrivers = (net?.activeDrivers || []).filter((driver) => driver.id !== port.id);
+    const receiving = port.kind === 'pin' && port.role === 'receiver' && activeOtherDrivers.length === 1;
     const receivers = (net?.receivers || []).filter((receiver) => receiver.id !== port.id);
     const ready = Boolean(net && !net.conflict && !net.cycle && (receiving || receivers.length));
     const busy = Boolean(state.circuit.sources[port.id] || state.circuit.pinOutputs[port.id]
@@ -662,10 +653,10 @@ export function circuitConnections(level, state) {
       reason: port.kind === 'pin' && state.circuit.pinOutputs[port.id]
         ? `Holding bit ${state.circuit.pinOutputs[port.id].value}. Walk over this tungsten pin to collect it.`
         : !net ? 'Open: copper has not reached this pad.'
-        : net.conflict ? 'Short: multiple output drivers share this copper. Undo and separate the traces.'
+        : net.conflict ? 'Short: more than one active driver is sending onto this copper. Wait, reclaim a bit, or separate the traces.'
           : net.cycle ? 'Feedback loop: route the output forward to another component or DEST.'
-            : receiving ? `Receives from ${net.drivers[0].label}. Walk over this pin to collect a waiting bit.`
-              : !receivers.length ? 'Open: this trace does not reach an input pad.'
+            : receiving ? `Receives from ${activeOtherDrivers[0].label}. Walk over this pin to collect a waiting bit.`
+              : !receivers.length ? 'Open: this trace does not reach another receiving pin or input.'
                 : `Connected to ${receivers.map((receiver) => receiver.label).join(', ')}.`,
     };
   });
@@ -802,8 +793,8 @@ export function advanceCircuit(level, state, delta) {
 
   const nets = circuitNets(level, next);
   nets.forEach((net) => {
-    if (net.conflict || net.cycle || net.drivers.length !== 1 || !net.receivers.length) return;
-    const driver = net.drivers[0];
+    if (net.conflict || net.cycle || net.activeDrivers.length !== 1 || !net.receivers.length) return;
+    const driver = net.activeDrivers[0];
     const bit = ['source', 'pin'].includes(driver.kind) ? next.circuit.sources[driver.id] : next.gateState[driver.gateId].pendingOutput;
     if (!bit || !net.receivers.every((receiver) => receiverAvailable(next, receiver))) return;
     // Fan-out creates one copy per connected input, exactly once for this finite source token.
