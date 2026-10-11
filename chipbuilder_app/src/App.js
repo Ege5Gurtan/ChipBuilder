@@ -284,7 +284,7 @@ function App() {
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
-              <small>{level.circuit ? 'Load nearby wire pin / drop bit' : 'Load nearby gate input / drop bit'}</small>
+              <small>Drop selected cargo bit onto wafer</small>
             </div>
             <div className="key-line">
               <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
@@ -358,7 +358,7 @@ function App() {
             </div>
             <p className="microcopy">
               Ordered left → right. Drag to reorder, click to select, <b>K</b> drops.
-              {level.circuit && ' Send a bit by selecting it and clicking a supplied SRC or a tungsten pin, dragging it onto the pin, or pressing K nearby.'}
+              {level.circuit && ' Send a bit by selecting it and clicking a supplied SRC or tungsten pin, or drag the bit onto that port. K always drops onto the wafer.'}
               {socketGates.length > 0 && ' Drive next to A/B and press K, drag a bit onto a port, or select it and click the port.'}
             </p>
             <div className={`cargo-row ${drag ? 'dragging' : ''}`}>
@@ -453,8 +453,8 @@ function App() {
                   </span>
                 </div>
                 {gate.wired ? <p className="microcopy">Copper carries a bit into IN. {gate.type} consumes the input and sends its result through the wire at OUT. Walking through this gate leaves cargo unchanged. Walk over OUT to collect a waiting output bit, then carry it to DEST and press Enter.</p> : <><p className="microcopy">
-                  Use the physical A/B ports on the wafer. The easiest method is to drive next to an empty port and press K.
-                  Drag/drop and select + click also work. Click a loaded input to take it back before the second input is loaded.
+                  Use the physical A/B ports on the wafer. Drag a cargo bit onto a port or select the bit and click the port.
+                  K is reserved for dropping cargo freely onto the wafer. Click a loaded input to take it back before the second input is loaded.
                 </p>
                 <p className="gate-reason">
                   When both inputs are loaded, they are consumed and one new output bit appears at OUT. Walk over OUT to collect it.
