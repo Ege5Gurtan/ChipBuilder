@@ -162,7 +162,7 @@ const levels = [
     number: '09',
     title: 'Wire the NOT Gate',
     goal: 'Fabricate SRC → NOT IN and send a 0. Deliver the output 1 to DEST by copper or by carrying it.',
-    lesson: 'Paint two separate routes, including the tiles beneath the contact pads. Etch once, then Fill Copper. Collect the 0, select it and click SRC (or press K nearby). Copper is passive: the source and gate output determine direction. Keep their traces separate. You can also collect a waiting bit at OUT and carry it to DEST; press Enter to deliver.',
+    lesson: 'Paint two separate routes, including the tiles beneath the contact pads. Etch once, then Fill Copper. Collect the 0, then select it and click SRC or drag it onto SRC. K always drops cargo onto the wafer. Copper is passive: whichever active source actually holds a bit determines signal flow. You can also collect a waiting bit at OUT and carry it to DEST; press Enter to deliver.',
     target: '1',
     start: { x: -5.2, y: -2.8 },
     destination: { x: 4.333, y: -0.375 },
