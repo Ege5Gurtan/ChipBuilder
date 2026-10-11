@@ -231,29 +231,33 @@ function App() {
         <button className="restart-button" onClick={restart}>Restart level</button>
       </header>
 
-      <section className={`telemetry ${game.terrain ? 'terrain-telemetry' : ''}`} aria-label="Live signal status">
+      <section className={`telemetry ${game.terrain ? 'terrain-telemetry' : ''}`} aria-label={level.sandbox ? 'Sandbox status' : 'Live signal status'}>
+        {!level.sandbox && (
+          <>
+            <div>
+              <span>Target signal</span>
+              <strong
+                key={game.feedback?.seq || 0}
+                className={`signal-value target-bits ${game.feedback ? `feedback-${game.feedback.kind}` : ''}`}
+                aria-label={`Target ${level.target}, ${game.targetSlots.filter((slot) => slot.delivered).length} of ${game.targetSlots.length} delivered`}
+              >
+                {game.targetSlots.map((slot, index) => (
+                  <span key={index} className={`target-bit ${slot.delivered ? 'delivered' : ''}`}>{slot.value}</span>
+                ))}
+              </strong>
+            </div>
+            <div>
+              <span>Current signal</span>
+              <strong className="signal-value target-bits">
+                {game.targetSlots.map((slot, index) => (
+                  <span key={index} className={slot.delivered ? '' : 'unresolved'}>{slot.delivered ? slot.value : '_'}</span>
+                ))}
+              </strong>
+            </div>
+          </>
+        )}
         <div>
-          <span>Target signal</span>
-          <strong
-            key={game.feedback?.seq || 0}
-            className={`signal-value target-bits ${game.feedback ? `feedback-${game.feedback.kind}` : ''}`}
-            aria-label={`Target ${level.target}, ${game.targetSlots.filter((slot) => slot.delivered).length} of ${game.targetSlots.length} delivered`}
-          >
-            {game.targetSlots.map((slot, index) => (
-              <span key={index} className={`target-bit ${slot.delivered ? 'delivered' : ''}`}>{slot.value}</span>
-            ))}
-          </strong>
-        </div>
-        <div>
-          <span>Current signal</span>
-          <strong className="signal-value target-bits">
-            {game.targetSlots.map((slot, index) => (
-              <span key={index} className={slot.delivered ? '' : 'unresolved'}>{slot.delivered ? slot.value : '_'}</span>
-            ))}
-          </strong>
-        </div>
-        <div>
-          <span>Cargo</span>
+          <span>{level.sandbox ? 'Test bit cargo' : 'Cargo'}</span>
           <strong>{game.cargo.length} bit{game.cargo.length === 1 ? '' : 's'}</strong>
         </div>
         <div>
@@ -286,10 +290,12 @@ function App() {
               <div className="key-row" aria-hidden="true"><kbd>K</kbd></div>
               <small>Drop bit; valid copper carries it automatically</small>
             </div>
-            <div className="key-line">
-              <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
-              <small>Deliver cargo at DEST</small>
-            </div>
+            {!level.sandbox && (
+              <div className="key-line">
+                <div className="key-row" aria-hidden="true"><kbd className="wide-key">Enter</kbd></div>
+                <small>Deliver cargo at DEST</small>
+              </div>
+            )}
             {game.terrain && (
               <div className="key-line">
                 <div className="key-row" aria-hidden="true"><kbd className="wide-key">Ctrl+Z</kbd></div>
@@ -303,7 +309,7 @@ function App() {
             <button onClick={() => handleMove({ x: 0, y: -0.35 })} aria-label="Move down">↓</button>
             <button onClick={() => handleMove({ x: 0.35, y: 0 })} aria-label="Move right">→</button>
             <button onClick={drop} aria-label="Drop selected cargo bit">K</button>
-            <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>
+            {!level.sandbox && <button onClick={deliver} aria-label="Deliver cargo at DEST">↵</button>}
           </div>
         </aside>
 
@@ -561,26 +567,27 @@ function App() {
             </section>
           )}
 
-          <section className="tool-section delivery-section">
-            <div className="section-heading">
-              <span>{level.gates.length || level.fabrication ? '03' : '02'}</span>
-              <h3>DEST delivery</h3>
-            </div>
-            <div className="slot-row" aria-label="Target slots">
-              {game.targetSlots.map((slot, index) => (
-                <span key={index} className={`target-slot ${slot.delivered ? 'delivered' : ''}`}>
-                  {slot.delivered && <i aria-hidden="true">✓</i>}{slot.value}
-                </span>
-              ))}
-            </div>
-            <p className={`microcopy ${game.atDestination ? 'at-dest' : ''}`}>
-              {level.circuit && 'Wired signals are checked automatically; rejected bits return to cargo. '}{game.atDestination
-                ? 'Carrier at DEST. Press Enter to submit cargo.'
-                : 'Drive to DEST, then press Enter.'}
-              {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
-              {level.sandbox && ' A correct sandbox signal resets the target instead of ending the level.'}
-            </p>
-          </section>
+          {!level.sandbox && (
+            <section className="tool-section delivery-section">
+              <div className="section-heading">
+                <span>{level.gates.length || level.fabrication ? '03' : '02'}</span>
+                <h3>DEST delivery</h3>
+              </div>
+              <div className="slot-row" aria-label="Target slots">
+                {game.targetSlots.map((slot, index) => (
+                  <span key={index} className={`target-slot ${slot.delivered ? 'delivered' : ''}`}>
+                    {slot.delivered && <i aria-hidden="true">✓</i>}{slot.value}
+                  </span>
+                ))}
+              </div>
+              <p className={`microcopy ${game.atDestination ? 'at-dest' : ''}`}>
+                {level.circuit && 'Wired signals are checked automatically; rejected bits return to cargo. '}{game.atDestination
+                  ? 'Carrier at DEST. Press Enter to submit cargo.'
+                  : 'Drive to DEST, then press Enter.'}
+                {' '}Cargo fills open slots left → right; mismatching bits stay in cargo.
+              </p>
+            </section>
+          )}
         </aside>
       </div>
     </main>

@@ -116,9 +116,13 @@ const ThreeScene = React.forwardRef(function ThreeScene({ level, game, onMove, o
       tiles.push({ mesh, mask, contact });
     }
     const source = orb(0x5ae9ff, 0.28);
-    source.position.set(level.start.x, 0.9, -level.start.y); scene.add(source);
+    source.position.set(level.start.x, 0.9, -level.start.y);
+    source.visible = !level.sandbox;
+    scene.add(source);
     const destination = orb(0xffd16c, 0.36);
-    destination.position.set(level.destination.x, 0.9, -level.destination.y); scene.add(destination);
+    destination.position.set(level.destination.x, 0.9, -level.destination.y);
+    destination.visible = !level.sandbox;
+    scene.add(destination);
     const destLabel = label('DEST', '#ffd77d'); destLabel.position.y = 0.75; destination.add(destLabel);
     const player = orb(0x88eeff, 0.25); scene.add(player);
     const destinationMaterials = destination.children.filter((child) => child.isMesh).map((child) => child.material);
