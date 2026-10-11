@@ -125,7 +125,7 @@ export function createGame(level) {
     terrainHistory: [],
     circuit: {
       sources: Object.fromEntries((level.circuit?.sources || []).map((source) => [source.id, null])), packets: [],
-      pinOutputs: {}, pinTransfers: 0, pinVoltages: {},
+      pinOutputs: {}, pinTransfers: 0, pinRoles: {},
       prebuiltPinCells: circuitPorts(level).map((port) => cellKey(terrainCell(port.x, port.y))),
     },
     cost: { processSteps: 0, energy: 0, manufacturing: 0 },
@@ -534,8 +534,8 @@ function pushTerrainHistory(state) {
 function reconcilePinTokens(state) {
   const pins = new Set(wirePins(state.terrain).map((pin) => pin.id));
   const sources = { ...state.circuit.sources }, pinOutputs = { ...state.circuit.pinOutputs };
-  const pinVoltages = Object.fromEntries(
-    Object.entries(state.circuit.pinVoltages || {}).filter(([id]) => pins.has(id))
+  const pinRoles = Object.fromEntries(
+    Object.entries(state.circuit.pinRoles || {}).filter(([id]) => pins.has(id))
   );
   const returned = [];
   Object.keys(sources).filter((id) => id.startsWith('pin-') && !pins.has(id)).forEach((id) => {
@@ -546,7 +546,7 @@ function reconcilePinTokens(state) {
     if (pinOutputs[id]) returned.push(pinOutputs[id]);
     delete pinOutputs[id];
   });
-  return { ...state, cargo: [...state.cargo, ...returned], circuit: { ...state.circuit, sources, pinOutputs, pinVoltages },
+  return { ...state, cargo: [...state.cargo, ...returned], circuit: { ...state.circuit, sources, pinOutputs, pinRoles },
     message: returned.length ? `${state.message} Removed pin's bit returned to cargo.` : state.message };
 }
 
@@ -721,31 +721,41 @@ export function circuitPorts(level, state) {
     ...destinationPorts,
     ...wirePins(state?.terrain).map((pin) => {
       const hint = level.circuit?.pinHints?.find((item) => cellKey(terrainCell(item.x, item.y)) === cellKey(pin));
-      const voltage = state?.circuit?.pinVoltages?.[pin.id] || null;
+      const pinRole = state?.circuit?.pinRoles?.[pin.id] || null;
       const driving = state?.circuit?.sources?.[pin.id] || state?.circuit?.packets?.some((packet) => packet.driverId === pin.id);
       const role = level.sandbox
-        ? voltage === 'high' ? 'driver' : voltage === 'low' ? 'receiver' : 'neutral'
+        ? pinRole === 'drive' ? 'driver' : pinRole === 'receive' ? 'receiver' : 'neutral'
         : driving ? 'driver' : 'receiver';
-      return { ...pin, kind: 'pin', role, voltage, label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
+      return { ...pin, kind: 'pin', role, pinRole, label: hint?.label || `W (${pin.col + 1}, ${pin.row + 1})` };
     }),
   ];
 }
 
-export function setPinVoltage(level, state, pinId, voltage) {
-  if (!level.sandbox || !['high', 'low'].includes(voltage) || state.status !== 'playing') return state;
+export function setPinRole(level, state, pinId, pinRole) {
+  if (!level.sandbox || !['drive', 'receive'].includes(pinRole) || state.status !== 'playing') return state;
   const pin = wirePins(state.terrain).find((item) => item.id === pinId);
   if (!pin) return { ...state, message: 'That tungsten contact no longer exists.' };
-  if (state.circuit.packets.some((packet) => packet.driverId === pinId || packet.receiver.id === pinId)) {
-    return { ...state, message: 'Wait for the moving bit to arrive before changing this contact voltage.' };
+  const busy = state.circuit.sources[pinId]
+    || state.circuit.pinOutputs[pinId]
+    || state.circuit.packets.some((packet) => packet.driverId === pinId || packet.receiver.id === pinId);
+  if (busy) {
+    return { ...state, message: 'Collect or wait for the current bit before changing this contact role.' };
   }
   return {
     ...state,
     circuit: {
       ...state.circuit,
-      pinVoltages: { ...(state.circuit.pinVoltages || {}), [pinId]: voltage },
+      pinRoles: { ...(state.circuit.pinRoles || {}), [pinId]: pinRole },
     },
-    message: `${pinId} set to ${voltage === 'high' ? 'High' : 'Low'} voltage. A bit on a connected High contact will move toward a Low contact.`,
+    message: pinRole === 'drive'
+      ? `${pinId} set to Drive. Bits on this copper net move away from Drive toward a gate input or Receive contact.`
+      : `${pinId} set to Receive. This contact can accept bits from a Drive contact or gate output.`,
   };
+}
+
+// Temporary compatibility for any in-progress UI state while the role-based controls roll out.
+export function setPinVoltage(level, state, pinId, voltage) {
+  return setPinRole(level, state, pinId, voltage === 'high' ? 'drive' : voltage === 'low' ? 'receive' : voltage);
 }
 
 function circuitDriverActive(state, port) {
@@ -808,18 +818,18 @@ function wireDropEndpoints(net, state, position) {
   return { entry, receiver };
 }
 
-function sandboxVoltageEndpoints(net, state) {
+function sandboxRoleEndpoints(net, state) {
   const pins = net.ports.filter((port) => port.kind === 'pin');
-  const high = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'high');
-  if (high.length !== 1) return null;
+  const drives = pins.filter((port) => state.circuit.pinRoles?.[port.id] === 'drive');
+  if (drives.length !== 1) return null;
 
   const gateReceivers = net.receivers.filter((port) => port.kind === 'gate' && receiverAvailable(state, port));
-  if (gateReceivers.length === 1) return { entry: high[0], receiver: gateReceivers[0] };
+  if (gateReceivers.length === 1) return { entry: drives[0], receiver: gateReceivers[0] };
   if (gateReceivers.length > 1) return null;
 
-  const low = pins.filter((port) => state.circuit.pinVoltages?.[port.id] === 'low');
-  if (low.length !== 1 || !receiverAvailable(state, low[0])) return null;
-  return { entry: high[0], receiver: low[0] };
+  const receives = pins.filter((port) => state.circuit.pinRoles?.[port.id] === 'receive');
+  if (receives.length !== 1 || !receiverAvailable(state, receives[0])) return null;
+  return { entry: drives[0], receiver: receives[0] };
 }
 
 function sandboxPacketForBit(level, state, bit, position) {
@@ -827,7 +837,7 @@ function sandboxPacketForBit(level, state, bit, position) {
   const cell = terrainCell(position.x, position.y);
   const net = circuitNets(level, state).find((item) => item.cells.has(cellKey(cell)));
   if (!net) return null;
-  const endpoints = sandboxVoltageEndpoints(net, state);
+  const endpoints = sandboxRoleEndpoints(net, state);
   if (!endpoints) return null;
   const route = wireRoute(net, position, endpoints.receiver);
   if (!route.length) return null;
@@ -988,7 +998,7 @@ function collectPinOutputs(level, state) {
     return { ...current, cargo: [...current.cargo, bit], circuit: { ...current.circuit, pinOutputs },
       cost: { ...current.cost, energy: current.cost.energy + 1 },
       message: level.sandbox
-        ? `Collected bit ${bit.value} from the Low voltage tungsten contact.`
+        ? `Collected bit ${bit.value} from the Receive tungsten contact.`
         : `Collected tungsten pin output ${bit.value}. Carry it to DEST or send it into another wire.` };
   }, state);
 }
@@ -1020,7 +1030,7 @@ function receiveCircuitBit(level, state, packet) {
   if (receiver.kind === 'pin') return { ...state,
     circuit: { ...state.circuit, pinOutputs: { ...state.circuit.pinOutputs, [receiver.id]: bit }, pinTransfers: state.circuit.pinTransfers + 1 },
     message: level.sandbox
-      ? `Bit ${bit.value} reached the Low voltage tungsten contact.`
+      ? `Bit ${bit.value} reached the Receive tungsten contact.`
       : `${receiver.label} received ${bit.value}. Walk over this tungsten pin to collect it.` };
 
   if (receiver.kind === 'gate') {
